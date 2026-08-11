@@ -1,0 +1,36 @@
+.update-toast {
+  position: fixed;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  z-index: 1000;
+  width: min(22rem, calc(100vw - 2rem));
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 0.9rem;
+  color: #fff;
+  background: #3a210f;
+  box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.35);
+}
+
+.update-toast[hidden] { display: none; }
+.update-toast p { margin: 0 0 0.75rem; line-height: 1.4; }
+.update-actions { display: flex; gap: 0.6rem; justify-content: flex-end; }
+.update-actions .btn { width: auto; min-width: 6rem; margin: 0; }
+.update-toast[aria-busy="true"] { cursor: progress; }
+.update-toast[aria-busy="true"] #update-now::before {
+  content: '';
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-right: 0.45rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: cardgamesmp-spin 0.8s linear infinite;
+  vertical-align: -0.08rem;
+}
+
+@keyframes cardgamesmp-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .update-toast[aria-busy="true"] #update-now::before { animation: none; }
+}
