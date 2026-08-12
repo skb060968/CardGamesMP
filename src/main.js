@@ -1,27 +1,26 @@
-import '../../style.css';
-import '../../src/app-banner.css';
+import '../style.css';
 import './cardgamesmp.css';
-import * as pppRules from '../../src/games/patte-par-patta/engine.js';
-import * as fmRules from '../../src/games/flip-and-match/engine.js';
+import * as pppRules from './games/patte-par-patta/engine.js';
+import * as fmRules from './games/flip-and-match/engine.js';
 import {
   renderGameplay as renderPPPGameplay,
   renderLobbyPlayers as renderPPPLobbyPlayers,
   renderResults as renderPPPResults,
   setEventMessage as setPPPEventMessage,
-} from '../../src/games/patte-par-patta/ui.js';
+} from './games/patte-par-patta/ui.js';
 import {
   renderGameplay as renderFMGameplay,
   renderLobbyPlayers as renderFMLobbyPlayers,
   renderResults as renderFMResults,
   setEventMessage as setFMEventMessage,
-} from '../../src/games/flip-and-match/ui.js';
-import { renderCardFace } from '../../src/shared/card-renderer.js';
+} from './games/flip-and-match/ui.js';
+import { renderCardFace } from './shared/card-renderer.js';
 import {
   announceCapture, announceWin, initAudio, isMuted,
   playSound, toggleMute, warmSpeech,
-} from '../../src/shared/voice-announcer.js';
-import { createShareHandler, showQRCode } from '../../src/deep-link-handler.js';
-import { renderLandingPage, showScreen, showToast } from '../../src/platform-ui.js';
+} from './shared/voice-announcer.js';
+import { createShareHandler, showQRCode } from './deep-link-handler.js';
+import { renderLandingPage, showScreen, showToast } from './platform-ui.js';
 import { createPatteParPattaEffects, createPatteParPattaRuntime } from './games/patte-par-patta/index.js';
 import { createFlipAndMatchEffects, createFlipAndMatchRuntime } from './games/flip-and-match/index.js';
 import { createFirebaseClient } from './platform/firebase-client.js';

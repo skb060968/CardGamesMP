@@ -1,5 +1,7 @@
 node_modules
 dist
 .kiro
+.env
+.env.*
 *.bak
 README.md

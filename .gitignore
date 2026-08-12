@@ -1,11 +1,11 @@
 node_modules
 dist
 .env
-.env.local
+.env.*
 .kiro
 
-# Firebase rules shared across all projects
-firebase-rules.json
+# CardGamesMP owns this dedicated Firebase rules file.
+# Keep firebase-rules.json tracked for explicit deployment to its database.
 
 # Exclude documentation files (keep README.md)
 *.md

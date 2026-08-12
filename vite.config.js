@@ -3,8 +3,6 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 
 const projectRoot = fileURLToPath(new URL('.', import.meta.url));
-const legacyRoot = fileURLToPath(new URL('..', import.meta.url));
-const sharedPublic = fileURLToPath(new URL('../public', import.meta.url));
 const hardenedWorker = fileURLToPath(new URL('./public-new/sw.js', import.meta.url));
 
 function hardenedServiceWorker() {
@@ -29,12 +27,9 @@ function hardenedServiceWorker() {
 
 export default defineConfig({
   root: projectRoot,
-  publicDir: sharedPublic,
-  envDir: legacyRoot,
+  publicDir: 'public',
+  envDir: projectRoot,
   plugins: [hardenedServiceWorker()],
-  server: {
-    fs: { allow: [legacyRoot] },
-  },
   build: {
     emptyOutDir: true,
   },

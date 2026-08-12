@@ -1,11 +1,11 @@
-# CardGamesMP hardened scaffold
+# CardGamesMP
 
-This is a parallel implementation. The working application in the parent folder remains unchanged; proven parent rule, UI, audio, CSS, and resource modules are imported read-only while synchronization and runtime orchestration are rebuilt here.
+This is an independent hardened multiplayer card-games project. Its source, styles, public assets, dependencies, Firebase configuration boundary, service worker, Vercel configuration, and dedicated database rules all live inside this folder. The original application in the parent folder remains unchanged.
 
 ## Current foundation
 
-- Six-game registry using the existing images in `../public`.
-- Existing `../style.css` is bundled without copying it.
+- Six-game registry using images copied into local `public/images`.
+- Local `style.css`, game engines/UI modules, shared render/audio utilities, icons, images, sounds, and manifest; no parent-folder build dependency.
 - Shared card-action entry points for draw, flip, throw, discard, and collect.
 - Commit-safe action execution that always publishes authoritative state after a successful write.
 - Stable, immutable rank/suit sorting with configurable Ace-low or Ace-high policy.
@@ -47,11 +47,11 @@ This is a parallel implementation. The working application in the parent folder 
 
 ## Browser-playable vertical slice
 
-The isolated entry point now wires the hardened runtime to the proven Patte Par Patta engine, UI renderer, audio, sharing, QR, CSS, and visual resources as read-only imports. The new page provides landing, create, join, lobby, gameplay, results, session restoration, deep-link joining, mute, share, QR, host round start, Play Again, and leave/home flows. Other game cards remain explicitly unavailable.
+The entry point wires the hardened runtime to local copies of the proven Patte Par Patta engine, UI renderer, audio, sharing, QR, CSS, and visual resources. The page provides landing, create, join, lobby, gameplay, results, session restoration, deep-link joining, mute, share, QR, host round start, Play Again, and leave/home flows. Unmigrated game cards remain explicitly unavailable.
 
 ## Flip & Match vertical slice
 
-Flip & Match is now the second browser-playable hardened game. It uses a revision-protected `commitFlip` transaction, independent transition replay, stable room-slot mapping, queued remote reconciliation, cancellation-safe reveal/match collection effects, six-character rooms, deep links, session restoration, host start/Play Again, and the existing rules/UI/audio/assets as read-only imports.
+Flip & Match is now the second browser-playable hardened game. It uses a revision-protected `commitFlip` transaction, independent transition replay, stable room-slot mapping, queued remote reconciliation, cancellation-safe reveal/match collection effects, six-character rooms, deep links, session restoration, host start/Play Again, and local copies of the proven rules/UI/audio/assets.
 
 ## Hardened PWA lifecycle
 
@@ -62,3 +62,11 @@ A dedicated, undeployed `CardGamesMP/firebase-rules.json` defines the isolated n
 ## Next slices
 
 Migrate Simple Rummy and Perfect Ten using their existing hardened draw/discard action modules, then migrate Bluff and Poker. Shared ready/Play Again coordination and explicit host kick/end-game operations also remain to be implemented.
+
+## Standalone deployment
+
+- Use `CardGamesMP` as the Vercel project root; `vercel.json` builds with `npm run build` and publishes `dist`.
+- Configure the `VITE_FIREBASE_*` values in Vercel project settings. Local `.env` files are excluded from Git and Vercel uploads.
+- Enable Firebase Authentication → Sign-in method → Anonymous for the dedicated Firebase project.
+- Explicitly deploy this repository's `firebase-rules.json` to the dedicated Realtime Database. The rules contain only the CardGamesMP `card-games-mp` namespace and are not shared with other game projects.
+- Live multiplayer verification should use two browser profiles/devices and cover create, join, start, move synchronization, refresh/reconnect, Play Again, leave, and host room deletion for both available games.

@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'cardgamesmp-app-';
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 
 self.addEventListener('install', (event) => {

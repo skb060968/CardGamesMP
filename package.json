@@ -1,0 +1,23 @@
+{
+  "name": "cardgames-mp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hardened multiplayer card games platform",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "firebase": "12.11.0",
+    "qrcode": "1.5.4"
+  },
+  "devDependencies": {
+    "vite": "7.3.6"
+  },
+  "license": "MIT"
+}
