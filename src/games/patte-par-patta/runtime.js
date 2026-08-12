@@ -122,7 +122,26 @@ export function createPatteParPattaRuntime({
 
   async function refreshRoom(move = null) {
     if (!store || disposed) return;
-    const room = await store.readRoom();
+    let room;
+    try {
+      room = await store.readRoom();
+    } catch (error) {
+      if (error?.code !== 'room-not-found') throw error;
+      await disconnectLocal({ suppressErrors: true });
+      sessions.clear();
+      disposed = true;
+      coordinator.dispose();
+      callbacks.onDisconnected?.({ roomDeleted: true });
+      return;
+    }
+    if (room.players?.[`player_${roomSlotIndex}`]?.uid !== uid) {
+      await disconnectLocal({ suppressErrors: true });
+      sessions.clear();
+      disposed = true;
+      coordinator.dispose();
+      callbacks.onDisconnected?.({ removed: true });
+      return;
+    }
     updateIdentity(room);
     if (room.meta?.status === 'active' && room.game) {
       if (move?.id) {
@@ -234,7 +253,11 @@ export function createPatteParPattaRuntime({
         slotId: entries[index][0],
       })),
     };
-    const updated = await store.resetRoom({ state: nextState, status: 'active' });
+    const updated = await store.resetRoom({
+      state: nextState,
+      status: 'active',
+      expectedRoster: Object.fromEntries(entries.map(([slot, player]) => [slot, player.uid])),
+    });
     state = updated.game;
     updateIdentity(updated);
     await effects.render({ state, playerIndex: gamePlayerIndex });
@@ -243,18 +266,26 @@ export function createPatteParPattaRuntime({
   }
 
 
+  async function removeLobbyPlayer({ playerIndex, expectedUid }) {
+    ensureConnected();
+    if (!host) throw new Error('Only the host can remove a player');
+    const result = await store.removePlayer({ playerIndex, expectedUid });
+    await refreshRoom();
+    return result;
+  }
+
   async function throwLocalCard(handIndex = 0) {
     ensureConnected();
     if (gamePlayerIndex < 0) throw new Error('Player is not seated in the active round');
     return performThrow({ handIndex, playerIndex: gamePlayerIndex });
   }
 
-  async function disconnectLocal() {
+  async function disconnectLocal({ suppressErrors = false } = {}) {
     if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
     if (stopPresence) {
       const stop = stopPresence;
       stopPresence = null;
-      try { await stop(); } catch (error) { reportError(error); }
+      try { await stop(); } catch (error) { if (!suppressErrors) reportError(error); }
     }
   }
 
@@ -286,6 +317,7 @@ export function createPatteParPattaRuntime({
     restoreSession,
     startRound,
     playAgain: startRound,
+    removePlayer: removeLobbyPlayer,
     throwCard: throwLocalCard,
     leaveRoom,
     close,

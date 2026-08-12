@@ -65,9 +65,9 @@ function requireToken(value, name) {
   }
 }
 
-function requireIdentity(value) {
+function requireIdentity(value, name = 'playerUid') {
   if (typeof value !== 'string' || value.length < 1 || value.length > 128) {
-    throw new TypeError('playerUid must be a non-empty string of at most 128 characters');
+    throw new TypeError(`${name} must be a non-empty string of at most 128 characters`);
   }
 }
 
@@ -178,6 +178,57 @@ export function createFirebaseRoomStore({
   const roomPath = (code = selectedRoomCode) => `${basePath}/${code}`;
   const roomRef = (code = selectedRoomCode) => makeRef(database, roomPath(code));
   const childRef = (path) => makeRef(database, `${roomPath()}/${path}`);
+
+  async function primeExistingRoom(operation) {
+    let unsubscribe = null;
+    let timer = null;
+    let settled = false;
+    const cleanup = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      if (typeof unsubscribe === 'function') unsubscribe();
+      unsubscribe = null;
+    };
+
+    try {
+      const value = await new Promise((resolve, reject) => {
+        const finish = (callback, result) => {
+          if (settled) return;
+          settled = true;
+          if (timer !== null) clearTimeout(timer);
+          timer = null;
+          callback(result);
+        };
+        timer = setTimeout(() => finish(
+          reject,
+          new RoomLifecycleError('room-sync-timeout', `${operation} could not load the room`),
+        ), 10000);
+        unsubscribe = listenValue(
+          roomRef(),
+          (snapshot) => finish(resolve, snapshot.val()),
+          (error) => finish(reject, lifecycleError(error, operation)),
+        );
+      });
+      if (!value) {
+        cleanup();
+        throw new RoomNotFoundError();
+      }
+      return cleanup;
+    } catch (error) {
+      cleanup();
+      throw error;
+    }
+  }
+
+  async function transactExistingRoom(operation, update) {
+    requireFunction(update, 'transaction update');
+    const stopPriming = await primeExistingRoom(operation);
+    try {
+      return await transact(roomRef(), update, { applyLocally: false });
+    } finally {
+      stopPriming();
+    }
+  }
 
   function encodeGame(state) {
     const encoded = cloneFirebaseValue(encodeState(state), 'state');
@@ -503,7 +554,7 @@ export function createFirebaseRoomStore({
     let removedIndex = -1;
     let result;
     try {
-      result = await transact(roomRef(), (currentRoom) => {
+      result = await transactExistingRoom('leave-room', (currentRoom) => {
         rejectionCode = 'transaction-aborted';
         removedIndex = -1;
         if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
@@ -530,7 +581,7 @@ export function createFirebaseRoomStore({
           presence: nextPresence,
           meta: { ...currentRoom.meta, lastActivity: now() },
         };
-      }, { applyLocally: false });
+      });
     } catch (error) {
       throw lifecycleError(error, 'leave-room');
     }
@@ -541,18 +592,80 @@ export function createFirebaseRoomStore({
     return { playerIndex: removedIndex, slotId: slotId(removedIndex), room: decodeRoom(result.snapshot.val()) };
   }
 
+  async function removePlayer({ playerIndex, expectedUid } = {}) {
+    if (!Number.isInteger(playerIndex) || playerIndex < 0 || playerIndex >= SLOT_COUNT) {
+      throw new TypeError('playerIndex must be an integer from 0 through 5');
+    }
+    requireIdentity(expectedUid, 'expectedUid');
+
+    const key = slotId(playerIndex);
+    let rejectionCode = 'transaction-aborted';
+    let result;
+    try {
+      result = await transactExistingRoom('remove-player', (currentRoom) => {
+        rejectionCode = 'transaction-aborted';
+        if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
+        if (currentRoom.meta?.hostUid !== playerUid) {
+          rejectionCode = 'host-identity-mismatch';
+          return undefined;
+        }
+        if (currentRoom.meta?.status !== 'waiting') {
+          rejectionCode = 'room-not-waiting';
+          return undefined;
+        }
+        const target = currentRoom.players?.[key];
+        if (!target) { rejectionCode = 'player-not-found'; return undefined; }
+        if (target.uid !== expectedUid) {
+          rejectionCode = 'player-identity-mismatch';
+          return undefined;
+        }
+        if (key === currentRoom.meta?.hostSlot || target.uid === currentRoom.meta?.hostUid || target.isHost === true) {
+          rejectionCode = 'cannot-remove-host';
+          return undefined;
+        }
+
+        const nextPlayers = { ...(currentRoom.players || {}) };
+        delete nextPlayers[key];
+        const nextPresence = { ...(currentRoom.presence || {}) };
+        delete nextPresence[uidPathKey(target.uid)];
+        return {
+          ...currentRoom,
+          players: nextPlayers,
+          presence: nextPresence,
+          meta: { ...currentRoom.meta, lastActivity: now() },
+        };
+      });
+    } catch (error) {
+      throw lifecycleError(error, 'remove-player');
+    }
+
+    if (!result.committed) {
+      if (rejectionCode === 'room-not-found') throw new RoomNotFoundError();
+      if (rejectionCode === 'host-identity-mismatch') {
+        throw new RoomOwnershipError(rejectionCode, `Remove rejected: ${rejectionCode}`);
+      }
+      throw new RoomLifecycleError(rejectionCode, `Remove rejected: ${rejectionCode}`);
+    }
+    return {
+      playerIndex,
+      slotId: key,
+      uid: expectedUid,
+      room: decodeRoom(result.snapshot.val()),
+    };
+  }
+
   async function deleteRoom() {
     let rejectionCode = 'transaction-aborted';
     let result;
     try {
-      result = await transact(roomRef(), (currentRoom) => {
+      result = await transactExistingRoom('delete-room', (currentRoom) => {
         if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
         if (currentRoom.meta?.hostUid !== playerUid) {
           rejectionCode = 'host-identity-mismatch';
           return undefined;
         }
         return null;
-      }, { applyLocally: false });
+      });
     } catch (error) {
       throw lifecycleError(error, 'delete-room');
     }
@@ -563,18 +676,40 @@ export function createFirebaseRoomStore({
     return { roomCode: selectedRoomCode, deleted: true };
   }
 
-  async function resetRoom({ state, status = 'waiting' } = {}) {
+  async function resetRoom({ state, status = 'waiting', expectedRoster = null } = {}) {
     requireToken(status, 'status');
+    let safeRoster = null;
+    if (expectedRoster !== null) {
+      requireObject(expectedRoster, 'expectedRoster');
+      safeRoster = cloneFirebaseValue(expectedRoster, 'expectedRoster');
+      for (const [key, uid] of Object.entries(safeRoster)) {
+        if (!/^player_[0-5]$/.test(key)) throw new TypeError(`Invalid expected roster slot: ${key}`);
+        requireIdentity(uid, `expectedRoster.${key}`);
+      }
+    }
     const encodedState = encodeGame(state);
     const resetAt = now();
     let rejectionCode = 'transaction-aborted';
     let result;
     try {
-      result = await transact(roomRef(), (currentRoom) => {
+      result = await transactExistingRoom('reset-room', (currentRoom) => {
+        rejectionCode = 'transaction-aborted';
         if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
         if (currentRoom.meta?.hostUid !== playerUid) {
           rejectionCode = 'host-identity-mismatch';
           return undefined;
+        }
+        if (safeRoster !== null) {
+          const currentRoster = {};
+          for (let index = 0; index < SLOT_COUNT; index += 1) {
+            const key = slotId(index);
+            const uid = currentRoom.players?.[key]?.uid;
+            if (uid) currentRoster[key] = uid;
+          }
+          if (!sameValue(currentRoster, safeRoster)) {
+            rejectionCode = 'roster-conflict';
+            return undefined;
+          }
         }
         return {
           ...currentRoom,
@@ -588,13 +723,16 @@ export function createFirebaseRoomStore({
             lastActivity: resetAt,
           },
         };
-      }, { applyLocally: false });
+      });
     } catch (error) {
       throw lifecycleError(error, 'reset-room');
     }
     if (!result.committed) {
       if (rejectionCode === 'room-not-found') throw new RoomNotFoundError();
-      throw new RoomOwnershipError(rejectionCode, `Reset rejected: ${rejectionCode}`);
+      if (rejectionCode === 'host-identity-mismatch') {
+        throw new RoomOwnershipError(rejectionCode, `Reset rejected: ${rejectionCode}`);
+      }
+      throw new RoomLifecycleError(rejectionCode, `Reset rejected: ${rejectionCode}`);
     }
     return decodeRoom(result.snapshot.val());
   }
@@ -632,7 +770,7 @@ export function createFirebaseRoomStore({
     let result;
 
     try {
-      result = await transact(roomRef(), (currentRoom) => {
+      result = await transactExistingRoom('commit-throw', (currentRoom) => {
         rejectionCode = 'transaction-aborted';
         idempotent = false;
         if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
@@ -713,8 +851,11 @@ export function createFirebaseRoomStore({
             lastActivity: commitTime,
           },
         };
-      }, { applyLocally: false });
+      });
     } catch (error) {
+      if (error instanceof RoomLifecycleError) {
+        throw new RoomCommitError(error.code, `Throw commit failed: ${error.code}`, { cause: error });
+      }
       throw new RoomCommitError('firebase-operation-failed', 'Throw commit failed', { cause: error });
     }
 
@@ -775,7 +916,7 @@ export function createFirebaseRoomStore({
     let result;
 
     try {
-      result = await transact(roomRef(), (currentRoom) => {
+      result = await transactExistingRoom('commit-flip', (currentRoom) => {
         rejectionCode = 'transaction-aborted';
         idempotent = false;
         if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
@@ -861,8 +1002,11 @@ export function createFirebaseRoomStore({
             lastActivity: commitTime,
           },
         };
-      }, { applyLocally: false });
+      });
     } catch (error) {
+      if (error instanceof RoomLifecycleError) {
+        throw new RoomCommitError(error.code, `Flip commit failed: ${error.code}`, { cause: error });
+      }
       throw new RoomCommitError('firebase-operation-failed', 'Flip commit failed', { cause: error });
     }
 
@@ -890,6 +1034,7 @@ export function createFirebaseRoomStore({
     subscribeRoom,
     startPresence,
     leaveRoom,
+    removePlayer,
     deleteRoom,
     resetRoom,
     commitThrow,

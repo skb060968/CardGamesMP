@@ -42,6 +42,11 @@ function errorMessage(error) {
     'room-not-found': 'Room not found.',
     'room-full': 'Room is full.',
     'room-not-joinable': 'This round has already started.',
+    'room-not-waiting': 'Players can only be removed while waiting in the lobby.',
+    'player-not-found': 'That player has already left.',
+    'player-identity-mismatch': 'The lobby changed. Please try again.',
+    'cannot-remove-host': 'The host cannot be removed.',
+    'roster-conflict': 'The player list changed. Review the lobby and start again.',
     'revision-conflict': 'Game advanced on another device. State refreshed.',
     'wrong-turn': 'It is not your turn.',
   };
@@ -57,7 +62,7 @@ function roomEntries(room) {
 function renderPPPLobby({ room, roomCode, isHost }) {
   const entries = roomEntries(room);
   element('lobby-room-code').textContent = roomCode;
-  renderPPPLobbyPlayers(entries.map(([, player]) => player), false, entries.map(([key]) => key));
+  renderPPPLobbyPlayers(entries.map(([, player]) => player), isHost, entries.map(([key]) => key));
   element('btn-start-online').hidden = !isHost;
   element('lobby-waiting').hidden = isHost;
   showScreen('ppp-lobby');
@@ -66,7 +71,7 @@ function renderPPPLobby({ room, roomCode, isHost }) {
 function renderFMLobby({ room, roomCode, isHost }) {
   const entries = roomEntries(room);
   element('fm-lobby-room-code').textContent = roomCode;
-  renderFMLobbyPlayers(entries.map(([, player]) => player), false, entries.map(([key]) => key));
+  renderFMLobbyPlayers(entries.map(([, player]) => player), isHost, entries.map(([key]) => key));
   element('fm-btn-start-online').hidden = !isHost;
   element('fm-lobby-waiting').hidden = isHost;
   showScreen('fm-lobby');
@@ -104,11 +109,13 @@ async function buildRuntime(gameId) {
       console.error(`[CardGamesMP:${gameId}]`, error);
       showToast(errorMessage(error), 3000);
     },
-    onDisconnected: () => {
+    onDisconnected: ({ removed = false, roomDeleted = false } = {}) => {
       if (runtime === candidate) {
         runtime = null;
         activeGameId = null;
         showScreen('landing-page');
+        if (removed) showToast('The host removed you from the lobby.', 3500);
+        else if (roomDeleted) showToast('The room was closed by the host.', 3500);
       }
     },
   };
@@ -206,6 +213,22 @@ async function runBusy(button, busyText, operation) {
   }
 }
 
+function wireLobbyRemoval(listId, gameId) {
+  element(listId).addEventListener('click', (event) => {
+    const button = event.target.closest('.remove-player-btn');
+    const activeRuntime = runtime;
+    if (!button || activeGameId !== gameId || !activeRuntime?.isHost) return;
+    const playerIndex = Number(button.dataset.playerIndex);
+    const expectedUid = button.dataset.playerUid;
+    if (!Number.isInteger(playerIndex) || !expectedUid) return;
+    const playerName = button.dataset.playerName || 'Player';
+    runBusy(button, '…', async () => {
+      await activeRuntime.removePlayer({ playerIndex, expectedUid });
+      showToast(`${playerName} was removed from the lobby.`, 2500);
+    });
+  });
+}
+
 function wireEmojiPickers() {
   document.querySelectorAll('.emoji-picker').forEach((picker) => {
     picker.addEventListener('click', (event) => {
@@ -227,6 +250,7 @@ async function leaveCurrentRoom() {
 }
 
 function wirePPP() {
+  wireLobbyRemoval('lobby-player-list', 'patte-par-patta');
   element('btn-create-room').addEventListener('click', () => showScreen('ppp-create-room'));
   element('btn-join-room').addEventListener('click', () => showScreen('ppp-join-room'));
   element('btn-back-online').addEventListener('click', () => showScreen('landing-page'));
@@ -271,6 +295,7 @@ function wirePPP() {
   mute.addEventListener('change', () => { mute.checked = toggleMute(); });
 }
 function wireFlipAndMatch() {
+  wireLobbyRemoval('fm-lobby-player-list', 'flip-and-match');
   element('fm-btn-create-room').addEventListener('click', () => showScreen('fm-create-room'));
   element('fm-btn-join-room').addEventListener('click', () => showScreen('fm-join-room'));
   element('fm-btn-back-online').addEventListener('click', () => showScreen('landing-page'));

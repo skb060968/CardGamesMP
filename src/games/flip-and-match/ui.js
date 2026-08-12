@@ -442,12 +442,15 @@ export function renderLobbyPlayers(players, isHost, playerKeys = []) {
       li.appendChild(badge);
     } else if (isHost && playerKeys[index]) {
       const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
       removeBtn.className = 'remove-player-btn';
       removeBtn.textContent = '✕';
-      removeBtn.title = 'Remove player';
-      const playerIndex = parseInt(playerKeys[index].replace('player_', ''), 10);
-      removeBtn.dataset.playerIndex = playerIndex;
-      removeBtn.dataset.playerName = player.name;
+      removeBtn.title = `Remove ${player.name || `Player ${index + 1}`}`;
+      removeBtn.setAttribute('aria-label', removeBtn.title);
+      const playerIndex = Number.parseInt(playerKeys[index].replace('player_', ''), 10);
+      removeBtn.dataset.playerIndex = String(playerIndex);
+      removeBtn.dataset.playerUid = player.uid;
+      removeBtn.dataset.playerName = player.name || `Player ${index + 1}`;
       li.appendChild(removeBtn);
     }
     list.appendChild(li);
