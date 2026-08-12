@@ -1,4 +1,5 @@
 import { createActionCoordinator } from '../../core/action-coordinator.js';
+import { generateRoomCode, normalizeRoomCode } from '../../core/room-code.js';
 import { createFirebaseRoomStore } from '../../data/firebase-room-store.js';
 import { createGameSessionStore } from '../../platform/session-storage.js';
 import { createPatteParPattaThrowAction } from './throw-action.js';
@@ -9,13 +10,6 @@ const MAX_PLAYERS = 4;
 
 function requireFunction(value, name) {
   if (typeof value !== 'function') throw new TypeError(`${name} must be a function`);
-}
-
-function generateRoomCode() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes = new Uint8Array(6);
-  globalThis.crypto.getRandomValues(bytes);
-  return Array.from(bytes, (value) => alphabet[value % alphabet.length]).join('');
 }
 
 function waitingState() {
@@ -113,7 +107,7 @@ export function createPatteParPattaRuntime({
   const makeStore = (roomCode) => roomStoreFactory({
     database,
     gameId: GAME_ID,
-    roomCode,
+    roomCode: normalizeRoomCode(roomCode),
     playerUid: uid,
     maxPlayers: MAX_PLAYERS,
     generateRoomCode: codeGenerator,
@@ -195,8 +189,7 @@ export function createPatteParPattaRuntime({
 
   async function joinRoom({ roomCode, player }) {
     if (store || disposed) throw new Error('Runtime cannot join another room');
-    const normalized = String(roomCode || '').trim().toUpperCase();
-    const activeStore = makeStore(normalized);
+    const activeStore = makeStore(roomCode);
     const joined = await activeStore.joinRoom({ player });
     return attach(activeStore, joined.playerIndex, joined.room);
   }

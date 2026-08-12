@@ -1,4 +1,5 @@
 import { createActionCoordinator } from '../../core/action-coordinator.js';
+import { generateRoomCode, normalizeRoomCode } from '../../core/room-code.js';
 import { createFirebaseRoomStore } from '../../data/firebase-room-store.js';
 import { createGameSessionStore } from '../../platform/session-storage.js';
 import { createFlipAndMatchFlipAction } from './flip-action.js';
@@ -6,24 +7,9 @@ import { createFlipAndMatchTransitionValidator } from './flip-transition.js';
 
 const GAME_ID = 'flip-and-match';
 const MAX_PLAYERS = 4;
-const ROOM_CODE_PATTERN = /^[A-Z0-9]{6}$/;
 
 function requireFunction(value, name) {
   if (typeof value !== 'function') throw new TypeError(`${name} must be a function`);
-}
-
-function generateRoomCode() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes = new Uint8Array(6);
-  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(bytes);
-  else for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
-  return Array.from(bytes, (value) => alphabet[value % alphabet.length]).join('');
-}
-
-function normalizeRoomCode(value, name = 'roomCode') {
-  const code = String(value || '').trim().toUpperCase();
-  if (!ROOM_CODE_PATTERN.test(code)) throw new TypeError(`${name} must be exactly 6 letters or digits`);
-  return code;
 }
 
 function waitingState() {

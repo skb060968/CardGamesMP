@@ -51,7 +51,7 @@
     <section id="ppp-join-room" class="screen" hidden aria-label="Join a room">
       <h2 class="setup-heading">Join Room</h2>
       <div class="setup-group">
-        <input id="room-code-input" type="text" maxlength="6" placeholder="Room Code" autocomplete="off" class="text-input" style="text-transform:uppercase">
+        <input id="room-code-input" type="text" maxlength="4" pattern="[A-HJ-NP-Z]{4}" placeholder="Room Code" autocomplete="off" class="text-input" style="text-transform:uppercase">
       </div>
       <div class="setup-group">
         <input id="join-name-input" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input">
@@ -74,7 +74,7 @@
     <section id="ppp-lobby" class="screen" hidden aria-label="Game lobby">
       <header class="lobby-header">
         <h2 class="lobby-title">Game Lobby</h2>
-        <p class="room-code-display">Room: <span id="lobby-room-code">------</span></p>
+        <p class="room-code-display">Room: <span id="lobby-room-code">----</span></p>
       </header>
       <ul id="lobby-player-list" class="player-list" aria-label="Players"></ul>
       <div class="lobby-actions">
@@ -135,7 +135,7 @@
 
     <section id="fm-join-room" class="screen" hidden aria-label="Join a Flip & Match room">
       <h2 class="setup-heading">Join Room</h2>
-      <div class="setup-group"><input id="fm-room-code" type="text" maxlength="6" placeholder="Room Code" autocomplete="off" class="text-input" style="text-transform:uppercase"></div>
+      <div class="setup-group"><input id="fm-room-code" type="text" maxlength="4" pattern="[A-HJ-NP-Z]{4}" placeholder="Room Code" autocomplete="off" class="text-input" style="text-transform:uppercase"></div>
       <div class="setup-group"><input id="fm-join-name" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input"></div>
       <div class="setup-group">
         <label class="setup-label">Choose Avatar</label>
@@ -148,7 +148,7 @@
     </section>
 
     <section id="fm-lobby" class="screen" hidden aria-label="Flip & Match lobby">
-      <header class="lobby-header"><h2 class="lobby-title">Game Lobby</h2><p class="room-code-display">Room: <span id="fm-lobby-room-code">------</span></p></header>
+      <header class="lobby-header"><h2 class="lobby-title">Game Lobby</h2><p class="room-code-display">Room: <span id="fm-lobby-room-code">----</span></p></header>
       <ul id="fm-lobby-player-list" class="player-list" aria-label="Players"></ul>
       <div class="lobby-actions">
         <button id="fm-btn-share-code" class="btn secondary" type="button">📋 Share Code</button>

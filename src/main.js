@@ -20,6 +20,7 @@ import {
   playSound, toggleMute, warmSpeech,
 } from './shared/voice-announcer.js';
 import { createShareHandler, showQRCode } from './deep-link-handler.js';
+import { normalizeRoomCode } from './core/room-code.js';
 import { renderLandingPage, showScreen, showToast } from './platform-ui.js';
 import { createPatteParPattaEffects, createPatteParPattaRuntime } from './games/patte-par-patta/index.js';
 import { createFlipAndMatchEffects, createFlipAndMatchRuntime } from './games/flip-and-match/index.js';
@@ -172,6 +173,23 @@ async function ensureRuntime(gameId) {
   activeGameId = gameId;
   return runtime;
 }
+
+async function connectToRoom(gameId, operation) {
+  const activeRuntime = await ensureRuntime(gameId);
+  try {
+    return await operation(activeRuntime);
+  } catch (error) {
+    if (!activeRuntime.connected) {
+      if (runtime === activeRuntime) {
+        runtime = null;
+        activeGameId = null;
+      }
+      await activeRuntime.close().catch(() => {});
+    }
+    throw error;
+  }
+}
+
 async function runBusy(button, busyText, operation) {
   if (!button || button.disabled) return;
   const original = button.textContent;
@@ -218,18 +236,17 @@ function wirePPP() {
   element('btn-create-submit').addEventListener('click', (event) => runBusy(event.currentTarget, 'Creating…', async () => {
     const name = element('create-name-input').value.trim();
     if (!name) throw new Error('Please enter your name.');
-    await (await ensureRuntime('patte-par-patta')).createRoom({
+    await connectToRoom('patte-par-patta', (activeRuntime) => activeRuntime.createRoom({
       player: { name, emoji: selectedEmoji('ppp-create-room') },
-    });
+    }));
   }));
   element('btn-join-submit').addEventListener('click', (event) => runBusy(event.currentTarget, 'Joining…', async () => {
-    const roomCode = element('room-code-input').value.trim().toUpperCase();
+    const roomCode = normalizeRoomCode(element('room-code-input').value);
     const name = element('join-name-input').value.trim();
-    if (roomCode.length !== 6) throw new Error('Enter a valid 6-character room code.');
     if (!name) throw new Error('Please enter your name.');
-    await (await ensureRuntime('patte-par-patta')).joinRoom({
+    await connectToRoom('patte-par-patta', (activeRuntime) => activeRuntime.joinRoom({
       roomCode, player: { name, emoji: selectedEmoji('ppp-join-room') },
-    });
+    }));
   }));
   element('btn-start-online').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.startRound()));
   element('btn-leave-lobby').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
@@ -263,18 +280,17 @@ function wireFlipAndMatch() {
   element('fm-btn-create-submit').addEventListener('click', (event) => runBusy(event.currentTarget, 'Creating…', async () => {
     const name = element('fm-create-name').value.trim();
     if (!name) throw new Error('Please enter your name.');
-    await (await ensureRuntime('flip-and-match')).createRoom({
+    await connectToRoom('flip-and-match', (activeRuntime) => activeRuntime.createRoom({
       player: { name, emoji: selectedEmoji('fm-create-room') },
-    });
+    }));
   }));
   element('fm-btn-join-submit').addEventListener('click', (event) => runBusy(event.currentTarget, 'Joining…', async () => {
-    const roomCode = element('fm-room-code').value.trim().toUpperCase();
+    const roomCode = normalizeRoomCode(element('fm-room-code').value);
     const name = element('fm-join-name').value.trim();
-    if (roomCode.length !== 6) throw new Error('Enter a valid 6-character room code.');
     if (!name) throw new Error('Please enter your name.');
-    await (await ensureRuntime('flip-and-match')).joinRoom({
+    await connectToRoom('flip-and-match', (activeRuntime) => activeRuntime.joinRoom({
       roomCode, player: { name, emoji: selectedEmoji('fm-join-room') },
-    });
+    }));
   }));
   element('fm-btn-start-online').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.startRound()));
   element('fm-btn-leave-lobby').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
@@ -377,11 +393,16 @@ async function bootstrap() {
 
   const params = new URLSearchParams(location.search);
   const linkedRoom = params.get('room')?.trim().toUpperCase();
-  const linkedGame = AVAILABLE_IDS.has(params.get('game')) ? params.get('game') : 'patte-par-patta';
+  const requestedGame = params.get('game');
+  const linkedGame = AVAILABLE_IDS.has(requestedGame) ? requestedGame : null;
   if (linkedRoom) {
+    history.replaceState({}, '', location.pathname);
+    if (!linkedGame) {
+      showToast('This room link is missing a valid game. Ask the host to share a new link.', 4000);
+      return;
+    }
     const isFlipAndMatch = linkedGame === 'flip-and-match';
     element(isFlipAndMatch ? 'fm-room-code' : 'room-code-input').value = linkedRoom;
-    history.replaceState({}, '', location.pathname);
     showScreen(isFlipAndMatch ? 'fm-join-room' : 'ppp-join-room');
     return;
   }

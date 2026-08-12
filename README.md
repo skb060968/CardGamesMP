@@ -51,7 +51,7 @@ The entry point wires the hardened runtime to local copies of the proven Patte P
 
 ## Flip & Match vertical slice
 
-Flip & Match is now the second browser-playable hardened game. It uses a revision-protected `commitFlip` transaction, independent transition replay, stable room-slot mapping, queued remote reconciliation, cancellation-safe reveal/match collection effects, six-character rooms, deep links, session restoration, host start/Play Again, and local copies of the proven rules/UI/audio/assets.
+Flip & Match is now the second browser-playable hardened game. It uses a revision-protected `commitFlip` transaction, independent transition replay, stable room-slot mapping, queued remote reconciliation, cancellation-safe reveal/match collection effects, four-letter rooms, deep links, session restoration, host start/Play Again, and local copies of the proven rules/UI/audio/assets.
 
 ## Hardened PWA lifecycle
 
