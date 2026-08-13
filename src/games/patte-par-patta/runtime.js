@@ -81,27 +81,45 @@ export function createPatteParPattaRuntime({
 
   const coordinator = createActionCoordinator({
     onError: reportError,
-    applyRemote: async ({ room, move }) => {
+    applyRemote: async ({ room, move }, { signal }) => {
       const incoming = room?.game;
       if (!incoming || (state && incoming.revision <= state.revision)) return;
       const previous = state;
       const actor = move?.playerIndex;
-      if (previous && move?.type === 'throw-card' && actor !== gamePlayerIndex) {
-        await effects.animateThrow({
-          moveId: move.id, playerIndex: actor, card: move.card,
-          fromState: previous, toState: incoming,
-        });
-        if (move.captured) {
-          await effects.animateCapture({
-            moveId: move.id, playerIndex: actor, card: move.card,
-            fromState: previous, toState: incoming,
+      try {
+        if (previous && move?.type === 'throw-card' && actor !== gamePlayerIndex) {
+          await effects.animateThrow({
+            moveId: move.id,
+            playerIndex: actor,
+            localPlayerIndex: gamePlayerIndex,
+            handIndex: move.handIndex,
+            card: move.card,
+            fromState: previous,
+            toState: incoming,
+            signal,
           });
+          if (move.captured) {
+            await effects.animateCapture({
+              moveId: move.id,
+              playerIndex: actor,
+              card: move.card,
+              fromState: previous,
+              toState: incoming,
+              signal,
+            });
+          }
+        }
+      } catch (error) {
+        reportError(error);
+      } finally {
+        state = incoming;
+        updateIdentity(room);
+        try {
+          await effects.render({ state, playerIndex: gamePlayerIndex, captured: move?.captured });
+        } finally {
+          callbacks.onState?.(state, { remote: true, move });
         }
       }
-      state = incoming;
-      updateIdentity(room);
-      await effects.render({ state, playerIndex: gamePlayerIndex, captured: move?.captured });
-      callbacks.onState?.(state, { remote: true, move });
     },
   });
 

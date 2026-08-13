@@ -87,13 +87,20 @@ export function createFlipAndMatchEffects({
       }
       const first = cardElement(cardIndex);
       const second = cardElement(matchedIndex);
+      const cards = [first, second].filter(Boolean);
       const target = sweepTarget(actorIndex, localPlayerIndex);
       await animateMatchedPairCollection({
-        elements: [first, second],
+        elements: cards,
         targetRect: target?.getBoundingClientRect(),
         signal,
       });
-      await delay(500, signal);
+      cards.forEach((card) => { card.style.visibility = 'hidden'; });
+      try {
+        await delay(500, signal);
+      } catch (error) {
+        cards.forEach((card) => { card.style.removeProperty('visibility'); });
+        throw error;
+      }
     },
 
     async render({ state, playerIndex, onFlip, moveId, cardIndex, matched, matchedIndex }) {

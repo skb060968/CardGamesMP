@@ -8,6 +8,18 @@ function requireFunction(value, name) {
   if (typeof value !== 'function') throw new TypeError(`${name} must be a function`);
 }
 
+function temporaryThrowState(state, playerIndex, handIndex, card) {
+  return {
+    ...state,
+    players: state.players.map((player, index) => (
+      index === playerIndex
+        ? { ...player, hand: player.hand.filter((_, cardIndex) => cardIndex !== handIndex) }
+        : { ...player }
+    )),
+    pile: [...state.pile, card],
+  };
+}
+
 export function createPatteParPattaEffects({
   document: documentRef = globalThis.document,
   renderCardFace,
@@ -27,20 +39,37 @@ export function createPatteParPattaEffects({
   requireFunction(setEventMessage, 'setEventMessage');
 
   return Object.freeze({
-    async animateThrow({ playerIndex, card, signal }) {
+    async animateThrow({
+      playerIndex, localPlayerIndex = playerIndex, handIndex, card, fromState, signal,
+    }) {
       playSound('throw');
       const source = documentRef?.querySelector(
         `.player-slot[data-player-index="${playerIndex}"] .player-slot-deck .card`,
       );
       const pile = documentRef?.getElementById('pile-area');
-      if (!source || !pile) return;
-      await animateThrowToPile({
-        document: documentRef,
-        deckRect: source.getBoundingClientRect(),
-        pileRect: pile.getBoundingClientRect(),
-        faceElement: renderCardFace(card),
-        signal,
-      });
+      if (!source || !pile) {
+        renderGameplay(
+          temporaryThrowState(fromState, playerIndex, handIndex, card),
+          localPlayerIndex,
+        );
+        return;
+      }
+      source.style.visibility = 'hidden';
+      try {
+        await animateThrowToPile({
+          document: documentRef,
+          deckRect: source.getBoundingClientRect(),
+          pileRect: pile.getBoundingClientRect(),
+          faceElement: renderCardFace(card),
+          signal,
+        });
+        renderGameplay(
+          temporaryThrowState(fromState, playerIndex, handIndex, card),
+          localPlayerIndex,
+        );
+      } finally {
+        source.style.removeProperty('visibility');
+      }
     },
 
 
@@ -54,9 +83,10 @@ export function createPatteParPattaEffects({
           duration: 1000,
           signal,
         });
-        const target = documentRef?.querySelector(
-          `.player-slot[data-player-index="${playerIndex}"] .player-slot-deck .card`,
+        const playerDeck = documentRef?.querySelector(
+          `.player-slot[data-player-index="${playerIndex}"] .player-slot-deck`,
         );
+        const target = playerDeck?.querySelector('.card') || playerDeck;
         if (target) {
           await animateElementSweep({
             element: pile,
@@ -65,6 +95,7 @@ export function createPatteParPattaEffects({
             signal,
           });
         }
+        pile.style.visibility = 'hidden';
       }
       const player = fromState?.players?.[playerIndex];
       if (player) {
@@ -74,6 +105,7 @@ export function createPatteParPattaEffects({
     },
 
     async render({ state, playerIndex, win }) {
+      documentRef?.getElementById('pile-card')?.style.removeProperty('visibility');
       if (state.status === 'finished') {
         renderResults(state);
         await onFinished({ state, playerIndex, win });
