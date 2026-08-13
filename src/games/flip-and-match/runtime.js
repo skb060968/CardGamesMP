@@ -1,4 +1,5 @@
 import { createActionCoordinator } from '../../core/action-coordinator.js';
+import { firebaseArray } from '../../core/firebase-array.js';
 import { generateRoomCode, normalizeRoomCode } from '../../core/room-code.js';
 import { createFirebaseRoomStore } from '../../data/firebase-room-store.js';
 import { createGameSessionStore } from '../../platform/session-storage.js';
@@ -16,6 +17,20 @@ function waitingState() {
   return {
     status: 'waiting', revision: 0, board: [], players: [], playerSlots: [],
     currentPlayerIndex: 0, winnerIndex: null, isTie: false, tiedIndices: null,
+  };
+}
+
+function decodeGameState(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  return {
+    ...source,
+    board: firebaseArray(source.board),
+    players: firebaseArray(source.players).map((player) => ({
+      ...player,
+      collected: firebaseArray(player?.collected),
+    })),
+    playerSlots: firebaseArray(source.playerSlots),
+    tiedIndices: source.tiedIndices == null ? null : firebaseArray(source.tiedIndices),
   };
 }
 
@@ -55,6 +70,7 @@ export function createFlipAndMatchRuntime({
   let stopPresence = null;
   let disposed = false;
   let reconcileChain = Promise.resolve();
+  let rosterRefreshQueued = false;
 
   const reportError = (error) => {
     if (typeof callbacks.onError === 'function') callbacks.onError(error);
@@ -156,6 +172,7 @@ export function createFlipAndMatchRuntime({
     roomCode: normalizeRoomCode(roomCode),
     playerUid: uid,
     maxPlayers: MAX_PLAYERS,
+    decodeState: decodeGameState,
     generateRoomCode: () => normalizeRoomCode(codeGenerator(), 'generated roomCode'),
     validateTransition: createFlipAndMatchTransitionValidator(rules),
   });
@@ -163,6 +180,16 @@ export function createFlipAndMatchRuntime({
   const enqueue = (task) => {
     reconcileChain = reconcileChain.then(task).catch(reportError);
     return reconcileChain;
+  };
+
+  const queueRosterRefresh = (player, event) => {
+    callbacks.onPlayer?.(player, event);
+    if (rosterRefreshQueued) return;
+    rosterRefreshQueued = true;
+    enqueue(async () => {
+      rosterRefreshQueued = false;
+      await refreshRoom();
+    });
   };
 
   async function refreshRoom(move = null) {
@@ -191,7 +218,11 @@ export function createFlipAndMatchRuntime({
     if (room.meta?.status === 'active' && room.game) {
       if (move?.id) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
-      } else if (!state || room.game.revision !== state.revision) {
+      } else if (
+        !state
+        || room.game.revision !== state.revision
+        || room.game.status !== state.status
+      ) {
         state = room.game;
         await renderState({ state });
         callbacks.onState?.(state, { remote: true, move: null });
@@ -213,7 +244,7 @@ export function createFlipAndMatchRuntime({
     unsubscribeRoom = store.subscribeRoom({
       onMove: (move) => enqueue(() => refreshRoom(move?.id ? move : null)),
       onStatus: () => enqueue(() => refreshRoom()),
-      onPlayer: (player, event) => callbacks.onPlayer?.(player, event),
+      onPlayer: queueRosterRefresh,
       onError: reportError,
     });
     stopPresence = store.startPresence({ playerIndex: roomSlotIndex, onError: reportError });

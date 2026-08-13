@@ -1,5 +1,10 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import {
+  browserSessionPersistence,
+  getAuth,
+  setPersistence,
+  signInAnonymously,
+} from 'firebase/auth';
 import { getDatabase } from 'firebase/database';
 
 const REQUIRED_CONFIG = ['apiKey', 'authDomain', 'databaseURL', 'projectId', 'appId'];
@@ -31,7 +36,7 @@ function withAbort(promise, signal) {
 
 export async function createFirebaseClient({
   config = readFirebaseConfig(),
-  appName = 'cardgamesmp',
+  appName = 'cardgamesmp-session-v2',
   signal,
 } = {}) {
   if (typeof appName !== 'string' || !appName.trim()) throw new TypeError('appName is required');
@@ -39,6 +44,7 @@ export async function createFirebaseClient({
   const app = existing ? getApp(appName) : initializeApp(config, appName);
   const auth = getAuth(app);
   const database = getDatabase(app);
+  await withAbort(setPersistence(auth, browserSessionPersistence), signal);
   const user = auth.currentUser || (await withAbort(signInAnonymously(auth), signal)).user;
   if (!user?.uid) throw new Error('Firebase authentication did not return a UID');
   return Object.freeze({ app, auth, database, user, uid: user.uid });

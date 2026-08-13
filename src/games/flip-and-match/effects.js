@@ -64,14 +64,12 @@ export function createFlipAndMatchEffects({
         element,
         signal,
         reveal: () => {
-          if (matched) {
-            renderGameplay(
-              temporaryRevealState(fromState, cardIndex),
-              localPlayerIndex,
-              onFlip,
-              { id: moveId, playerIndex: actorIndex, cardIndex, matched },
-            );
-          }
+          renderGameplay(
+            temporaryRevealState(fromState, cardIndex),
+            localPlayerIndex,
+            onFlip,
+            { id: moveId, playerIndex: actorIndex, cardIndex, matched },
+          );
         },
       });
       if (!matched) setEventMessage('No match — card stays face-up');

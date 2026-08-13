@@ -42,6 +42,7 @@ function errorMessage(error) {
     'room-not-found': 'Room not found.',
     'room-full': 'Room is full.',
     'room-not-joinable': 'This round has already started.',
+    'identity-already-in-room': 'This browser tab is already a player in this room. Open the join link in a new tab or another device.',
     'room-not-waiting': 'Players can only be removed while waiting in the lobby.',
     'player-not-found': 'That player has already left.',
     'player-identity-mismatch': 'The lobby changed. Please try again.',
@@ -104,7 +105,6 @@ async function buildRuntime(gameId) {
   const client = await firebaseClient();
   let candidate;
   const commonCallbacks = {
-    onPlayer: () => candidate?.refresh(),
     onError: (error) => {
       console.error(`[CardGamesMP:${gameId}]`, error);
       showToast(errorMessage(error), 3000);
