@@ -78,6 +78,8 @@ function renderLocalHand(state, localPlayerIndex, canDiscard, onDiscard, control
   const container = clear(document.getElementById('sr-hand'));
   const player = state.players[localPlayerIndex];
   if (!container || !player) return;
+  const renderGeneration = String((Number(container.dataset.renderGeneration) || 0) + 1);
+  container.dataset.renderGeneration = renderGeneration;
 
   const byId = new Map(player.hand.map((card, handIndex) => [card.id, { card, handIndex }]));
   const ordered = [];
@@ -131,7 +133,21 @@ function renderLocalHand(state, localPlayerIndex, canDiscard, onDiscard, control
     suppressDiscardUntil = Date.now() + 500;
     event.preventDefault();
     event.stopPropagation();
-    if (!cancelled) controls.onReorder?.(cardId, targetVisualIndex);
+    if (cancelled) return;
+    const nextOrder = controls.onReorder?.(cardId, targetVisualIndex);
+    const orderChanged = Array.isArray(nextOrder)
+      && (nextOrder.length !== requestedOrder.length
+        || nextOrder.some((id, index) => id !== requestedOrder[index]));
+    if (orderChanged) {
+      setTimeout(() => {
+        if (container.isConnected && container.dataset.renderGeneration === renderGeneration) {
+          renderLocalHand(state, localPlayerIndex, canDiscard, onDiscard, {
+            ...controls,
+            handOrder: nextOrder,
+          });
+        }
+      }, 0);
+    }
   };
 
   ordered.forEach(({ card, handIndex }, visualIndex) => {
@@ -194,16 +210,20 @@ function renderLocalHand(state, localPlayerIndex, canDiscard, onDiscard, control
   if (count) count.textContent = `🃏 ${player.hand.length}`;
 }
 
-function wireSortControls(onSort, enabled) {
+function wireSortControls(onSort, enabled, onOrderChanged) {
   const rankButton = document.getElementById('sr-sort-rank');
   const suitButton = document.getElementById('sr-sort-suit');
+  const sort = (mode) => {
+    const nextOrder = onSort?.(mode);
+    if (Array.isArray(nextOrder)) onOrderChanged?.(nextOrder);
+  };
   if (rankButton) {
     rankButton.disabled = !enabled || typeof onSort !== 'function';
-    rankButton.onclick = () => onSort?.('rank');
+    rankButton.onclick = () => sort('rank');
   }
   if (suitButton) {
     suitButton.disabled = !enabled || typeof onSort !== 'function';
-    suitButton.onclick = () => onSort?.('suit');
+    suitButton.onclick = () => sort('suit');
   }
 }
 
@@ -243,7 +263,14 @@ export function renderGameplay(
   renderDrawPile(state, canDraw, onDraw);
   renderDiscardPile(state, canDraw, onDraw);
   renderLocalHand(state, localPlayerIndex, canDiscard, onDiscard, handControls);
-  wireSortControls(handControls.onSort, state.status === 'playing');
+  wireSortControls(
+    handControls.onSort,
+    state.status === 'playing',
+    (nextOrder) => renderLocalHand(state, localPlayerIndex, canDiscard, onDiscard, {
+      ...handControls,
+      handOrder: nextOrder,
+    }),
+  );
   renderDrawResult(state, localPlayerIndex, lastMove);
   const bar = document.getElementById('sr-event-bar');
   if (bar) {

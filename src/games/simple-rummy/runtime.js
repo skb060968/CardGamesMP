@@ -163,31 +163,22 @@ export function createSimpleRummyRuntime({
     return [...handOrder];
   };
 
-  const rerenderHandOrder = () => {
-    if (!state) return;
-    // Defer replacement of the dragged node until the browser has emitted the
-    // click that follows pointerup; the old node suppresses that click safely.
-    setTimeout(() => {
-      if (state && !disposed) renderState({ state }).catch(reportError);
-    }, 0);
-  };
-
   function reorderVisualCard(cardId, targetVisualIndex) {
     const current = reconcileHandOrder();
     const sourceIndex = current.indexOf(cardId);
-    if (sourceIndex < 0 || !Number.isInteger(targetVisualIndex)) return;
+    if (sourceIndex < 0 || !Number.isInteger(targetVisualIndex)) return current;
     const targetIndex = Math.max(0, Math.min(targetVisualIndex, current.length - 1));
-    if (sourceIndex === targetIndex) return;
+    if (sourceIndex === targetIndex) return current;
     current.splice(sourceIndex, 1);
     current.splice(targetIndex, 0, cardId);
     handOrder = current;
     persistHandOrder();
-    rerenderHandOrder();
+    return [...handOrder];
   }
 
   function sortVisualCards(mode) {
-    if (mode !== 'rank' && mode !== 'suit') return;
     const current = reconcileHandOrder();
+    if (mode !== 'rank' && mode !== 'suit') return current;
     const cards = new Map(
       (state?.players?.[gamePlayerIndex]?.hand || []).map((card) => [card.id, card]),
     );
@@ -203,10 +194,11 @@ export function createSimpleRummyRuntime({
         || left.id.localeCompare(right.id);
     };
     const sorted = [...current].sort(compare);
-    if (sameOrder(sorted, handOrder)) return;
-    handOrder = sorted;
-    persistHandOrder();
-    rerenderHandOrder();
+    if (!sameOrder(sorted, handOrder)) {
+      handOrder = sorted;
+      persistHandOrder();
+    }
+    return [...handOrder];
   }
 
   const expectedRoster = (room) => room?.expectedRoster || room?.meta?.expectedRoster || null;
