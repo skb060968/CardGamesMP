@@ -1054,6 +1054,330 @@ export function createFirebaseRoomStore({
     };
   }
 
+  function commitError(error, operation) {
+    if (error instanceof RoomCommitError) return error;
+    const code = error instanceof RoomLifecycleError
+      ? error.code
+      : error instanceof TypeError
+        ? 'invalid-commit-payload'
+        : 'firebase-operation-failed';
+    return new RoomCommitError(code, `${operation} failed: ${code}`, { cause: error });
+  }
+
+  function commitSlotRejection(currentRoom, currentState, nextState, playerIndex) {
+    const currentSlots = currentState?.playerSlots;
+    const nextSlots = nextState?.playerSlots;
+    if (currentSlots !== undefined || nextSlots !== undefined) {
+      if (!Array.isArray(currentSlots)
+        || !Array.isArray(nextSlots)
+        || !sameValue(currentSlots, nextSlots)) {
+        return 'invalid-player-slot';
+      }
+    }
+
+    const currentPlayerSlot = currentState?.players?.[playerIndex]?.slotId;
+    const nextPlayerSlot = nextState?.players?.[playerIndex]?.slotId;
+    const currentSlot = currentSlots?.[playerIndex] ?? currentPlayerSlot;
+    const nextSlot = nextSlots?.[playerIndex] ?? nextPlayerSlot;
+    if (!/^player_[0-5]$/.test(currentSlot || '') || currentSlot !== nextSlot) {
+      return 'invalid-player-slot';
+    }
+    if ((currentPlayerSlot !== undefined && currentPlayerSlot !== currentSlot)
+      || (nextPlayerSlot !== undefined && nextPlayerSlot !== currentSlot)) {
+      return 'invalid-player-slot';
+    }
+
+    const playerCount = Math.max(
+      currentState?.players?.length || 0,
+      nextState?.players?.length || 0,
+    );
+    for (let index = 0; index < playerCount; index += 1) {
+      const previousSlot = currentState?.players?.[index]?.slotId;
+      const followingSlot = nextState?.players?.[index]?.slotId;
+      if (previousSlot !== undefined || followingSlot !== undefined) {
+        if (previousSlot !== followingSlot) return 'invalid-player-slot';
+      }
+    }
+
+    const owner = currentRoom.players?.[currentSlot];
+    if (owner?.slotId !== undefined && owner.slotId !== currentSlot) return 'invalid-player-slot';
+    return owner?.uid === playerUid ? null : 'player-identity-mismatch';
+  }
+
+  async function commitDraw(payload = {}) {
+    try {
+      requireObject(payload, 'draw commit payload');
+      const {
+        moveId, expectedRevision, playerIndex, source, card, state,
+      } = payload;
+      requireToken(moveId, 'moveId');
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+        throw new TypeError('expectedRevision must be a non-negative safe integer');
+      }
+      if (!Number.isInteger(playerIndex) || playerIndex < 0 || playerIndex >= SLOT_COUNT) {
+        throw new TypeError('playerIndex must be an integer from 0 through 5');
+      }
+      if (source !== 'drawPile' && source !== 'discardPile') {
+        throw new TypeError('source must be drawPile or discardPile');
+      }
+      if (card === undefined) throw new TypeError('card must not be undefined');
+
+      const safeState = cloneFirebaseValue(state, 'state');
+      const encodedNextState = encodeGame(safeState);
+      const nextState = decodeState(encodedNextState);
+      const actionCard = card === null ? null : cloneFirebaseValue(card, 'card');
+      if (nextState.revision !== expectedRevision + 1) {
+        throw new RoomCommitError('invalid-next-revision');
+      }
+      if (actionCard === null && nextState?.status !== 'finished') {
+        throw new RoomCommitError('invalid-terminal-card');
+      }
+
+      const action = {
+        type: 'draw-card',
+        moveId,
+        expectedRevision,
+        playerIndex,
+        source,
+        card: actionCard,
+      };
+      const commitTime = now();
+      let rejectionCode = 'transaction-aborted';
+      let idempotent = false;
+      const result = await transactExistingRoom('commit-draw', (currentRoom) => {
+        rejectionCode = 'transaction-aborted';
+        idempotent = false;
+        if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
+
+        const previousMove = currentRoom.lastMove;
+        if (previousMove?.id === moveId) {
+          const sameCard = actionCard === null
+            ? previousMove.card == null
+            : sameValue(previousMove.card, actionCard);
+          const sameMove = previousMove.type === 'draw-card'
+            && previousMove.expectedRevision === expectedRevision
+            && previousMove.revision === nextState.revision
+            && previousMove.playerIndex === playerIndex
+            && previousMove.source === source
+            && sameCard
+            && sameValue(currentRoom.game, encodedNextState);
+          if (!sameMove) { rejectionCode = 'move-id-collision'; return undefined; }
+          idempotent = true;
+          return currentRoom;
+        }
+
+        if (currentRoom.meta?.status !== 'active') {
+          rejectionCode = 'room-not-active';
+          return undefined;
+        }
+
+        let currentState;
+        try {
+          currentState = decodeState(currentRoom.game);
+        } catch (_) {
+          rejectionCode = 'invalid-current-state';
+          return undefined;
+        }
+        rejectionCode = commitSlotRejection(currentRoom, currentState, nextState, playerIndex);
+        if (rejectionCode) return undefined;
+
+        if (currentState?.revision !== expectedRevision) {
+          rejectionCode = 'revision-conflict';
+          return undefined;
+        }
+        if (currentState.currentPlayerIndex !== playerIndex) {
+          rejectionCode = 'wrong-turn';
+          return undefined;
+        }
+
+        let verdict;
+        try {
+          verdict = readVerdict(validateTransition({ currentState, nextState, action }));
+        } catch (_) {
+          verdict = { valid: false, reason: 'transition-validator-failed' };
+        }
+        if (!verdict.valid) {
+          rejectionCode = verdict.reason;
+          return undefined;
+        }
+
+        const lastMove = {
+          id: moveId,
+          type: 'draw-card',
+          expectedRevision,
+          revision: nextState.revision,
+          playerIndex,
+          source,
+          createdAt: commitTime,
+        };
+        if (actionCard !== null) lastMove.card = actionCard;
+        return {
+          ...currentRoom,
+          game: encodedNextState,
+          lastMove,
+          meta: {
+            ...currentRoom.meta,
+            status: 'active',
+            lastActivity: commitTime,
+          },
+        };
+      });
+
+      if (!result.committed) {
+        throw new RoomCommitError(rejectionCode, `Draw commit rejected: ${rejectionCode}`);
+      }
+      const committedRoom = result.snapshot.val();
+      if (!committedRoom?.game) throw new RoomCommitError('missing-committed-state');
+      return {
+        state: decodeState(committedRoom.game),
+        move: committedRoom.lastMove,
+        idempotent,
+      };
+    } catch (error) {
+      throw commitError(error, 'Draw commit');
+    }
+  }
+
+  async function commitDiscard(payload = {}) {
+    try {
+      requireObject(payload, 'discard commit payload');
+      const {
+        moveId, expectedRevision, playerIndex, handIndex, card, won, winGroups, state,
+      } = payload;
+      requireToken(moveId, 'moveId');
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+        throw new TypeError('expectedRevision must be a non-negative safe integer');
+      }
+      if (!Number.isInteger(playerIndex) || playerIndex < 0 || playerIndex >= SLOT_COUNT) {
+        throw new TypeError('playerIndex must be an integer from 0 through 5');
+      }
+      if (!Number.isInteger(handIndex) || handIndex < 0) throw new TypeError('Invalid handIndex');
+      if (card === undefined || card === null) throw new TypeError('card must not be null or undefined');
+      if (typeof won !== 'boolean') throw new TypeError('won must be boolean');
+      if (winGroups === undefined) throw new TypeError('winGroups must not be undefined');
+
+      const safeState = cloneFirebaseValue(state, 'state');
+      const encodedNextState = encodeGame(safeState);
+      const nextState = decodeState(encodedNextState);
+      const actionCard = cloneFirebaseValue(card, 'card');
+      const actionWinGroups = winGroups === null
+        ? null
+        : cloneFirebaseValue(winGroups, 'winGroups');
+      if (nextState.revision !== expectedRevision + 1) {
+        throw new RoomCommitError('invalid-next-revision');
+      }
+
+      const action = {
+        type: 'discard-card',
+        moveId,
+        expectedRevision,
+        playerIndex,
+        handIndex,
+        card: actionCard,
+        won,
+        winGroups: actionWinGroups,
+      };
+      const commitTime = now();
+      let rejectionCode = 'transaction-aborted';
+      let idempotent = false;
+      const result = await transactExistingRoom('commit-discard', (currentRoom) => {
+        rejectionCode = 'transaction-aborted';
+        idempotent = false;
+        if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
+
+        const previousMove = currentRoom.lastMove;
+        if (previousMove?.id === moveId) {
+          const sameWinGroups = actionWinGroups === null
+            ? previousMove.winGroups == null
+            : sameValue(previousMove.winGroups, actionWinGroups);
+          const sameMove = previousMove.type === 'discard-card'
+            && previousMove.expectedRevision === expectedRevision
+            && previousMove.revision === nextState.revision
+            && previousMove.playerIndex === playerIndex
+            && previousMove.handIndex === handIndex
+            && previousMove.won === won
+            && sameValue(previousMove.card, actionCard)
+            && sameWinGroups
+            && sameValue(currentRoom.game, encodedNextState);
+          if (!sameMove) { rejectionCode = 'move-id-collision'; return undefined; }
+          idempotent = true;
+          return currentRoom;
+        }
+
+        if (currentRoom.meta?.status !== 'active') {
+          rejectionCode = 'room-not-active';
+          return undefined;
+        }
+
+        let currentState;
+        try {
+          currentState = decodeState(currentRoom.game);
+        } catch (_) {
+          rejectionCode = 'invalid-current-state';
+          return undefined;
+        }
+        rejectionCode = commitSlotRejection(currentRoom, currentState, nextState, playerIndex);
+        if (rejectionCode) return undefined;
+
+        if (currentState?.revision !== expectedRevision) {
+          rejectionCode = 'revision-conflict';
+          return undefined;
+        }
+        if (currentState.currentPlayerIndex !== playerIndex) {
+          rejectionCode = 'wrong-turn';
+          return undefined;
+        }
+
+        let verdict;
+        try {
+          verdict = readVerdict(validateTransition({ currentState, nextState, action }));
+        } catch (_) {
+          verdict = { valid: false, reason: 'transition-validator-failed' };
+        }
+        if (!verdict.valid) {
+          rejectionCode = verdict.reason;
+          return undefined;
+        }
+
+        const lastMove = {
+          id: moveId,
+          type: 'discard-card',
+          expectedRevision,
+          revision: nextState.revision,
+          playerIndex,
+          handIndex,
+          card: actionCard,
+          won,
+          createdAt: commitTime,
+        };
+        if (actionWinGroups !== null) lastMove.winGroups = actionWinGroups;
+        return {
+          ...currentRoom,
+          game: encodedNextState,
+          lastMove,
+          meta: {
+            ...currentRoom.meta,
+            status: 'active',
+            lastActivity: commitTime,
+          },
+        };
+      });
+
+      if (!result.committed) {
+        throw new RoomCommitError(rejectionCode, `Discard commit rejected: ${rejectionCode}`);
+      }
+      const committedRoom = result.snapshot.val();
+      if (!committedRoom?.game) throw new RoomCommitError('missing-committed-state');
+      return {
+        state: decodeState(committedRoom.game),
+        move: committedRoom.lastMove,
+        idempotent,
+      };
+    } catch (error) {
+      throw commitError(error, 'Discard commit');
+    }
+  }
+
   return Object.freeze({
     get path() { return roomPath(); },
     get roomCode() { return selectedRoomCode; },
@@ -1070,5 +1394,7 @@ export function createFirebaseRoomStore({
     resetRoom,
     commitThrow,
     commitFlip,
+    commitDraw,
+    commitDiscard,
   });
 }

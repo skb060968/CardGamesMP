@@ -2842,3 +2842,38 @@ body {
     font-size: 0.7rem;
   }
 }
+
+/* Simple Rummy renderer-specific layout (all shared lifecycle styles are reused). */
+.sr-opponent {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.sr-opponent-hand {
+  flex-basis: 100%;
+  order: 3;
+}
+
+.sr-card-count {
+  opacity: 0.75;
+}
+
+.sr-self-summary,
+.sr-draw-result {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 22px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.sr-draw-result .card {
+  width: 30px;
+  height: 42px;
+}
+
+#sr-results-list .sr-result-status {
+  font-weight: 700;
+}

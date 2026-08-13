@@ -2,6 +2,7 @@ import '../style.css';
 import './cardgamesmp.css';
 import * as pppRules from './games/patte-par-patta/engine.js';
 import * as fmRules from './games/flip-and-match/engine.js';
+import * as srRules from './games/simple-rummy/engine.js';
 import {
   renderGameplay as renderPPPGameplay,
   renderLobbyPlayers as renderPPPLobbyPlayers,
@@ -14,7 +15,13 @@ import {
   renderResults as renderFMResults,
   setEventMessage as setFMEventMessage,
 } from './games/flip-and-match/ui.js';
-import { renderCardFace } from './shared/card-renderer.js';
+import {
+  renderGameplay as renderSRGameplay,
+  renderLobbyPlayers as renderSRLobbyPlayers,
+  renderResults as renderSRResults,
+  setEventMessage as setSREventMessage,
+} from './games/simple-rummy/ui.js';
+import { renderCardBack, renderCardFace } from './shared/card-renderer.js';
 import {
   announceCapture, announceWin, initAudio, isMuted,
   playSound, toggleMute, warmSpeech,
@@ -24,11 +31,12 @@ import { normalizeRoomCode } from './core/room-code.js';
 import { renderLandingPage, showScreen, showToast } from './platform-ui.js';
 import { createPatteParPattaEffects, createPatteParPattaRuntime } from './games/patte-par-patta/index.js';
 import { createFlipAndMatchEffects, createFlipAndMatchRuntime } from './games/flip-and-match/index.js';
+import { createSimpleRummyEffects, createSimpleRummyRuntime } from './games/simple-rummy/index.js';
 import { createFirebaseClient } from './platform/firebase-client.js';
 import { createServiceWorkerUpdateClient } from './platform/service-worker-update.js';
 import { GAMES } from './games/registry.js';
 
-const AVAILABLE_IDS = new Set(['patte-par-patta', 'flip-and-match']);
+const AVAILABLE_IDS = new Set(['patte-par-patta', 'flip-and-match', 'simple-rummy']);
 const AVAILABLE_GAMES = GAMES.map((game) => ({ ...game, available: AVAILABLE_IDS.has(game.id) }));
 const element = (id) => document.getElementById(id);
 const selectedEmoji = (screenId) =>
@@ -78,6 +86,15 @@ function renderFMLobby({ room, roomCode, isHost }) {
   showScreen('fm-lobby');
 }
 
+function renderSRLobby({ room, roomCode, isHost }) {
+  const entries = roomEntries(room);
+  element('sr-lobby-room-code').textContent = roomCode;
+  renderSRLobbyPlayers(entries.map(([, player]) => player), isHost, entries.map(([key]) => key));
+  element('sr-btn-start-online').hidden = !isHost;
+  element('sr-lobby-waiting').hidden = isHost;
+  showScreen('sr-lobby');
+}
+
 function showPPPFinished(state, gameRuntime) {
   showScreen('ppp-results');
   const button = element('btn-play-again');
@@ -94,6 +111,15 @@ function showFMFinished(state, gameRuntime) {
   button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
   const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
   if (winner && !state.isTie) announceWin(winner.name);
+}
+
+function showSRFinished(state, gameRuntime) {
+  showScreen('sr-results');
+  const button = element('sr-btn-play-again');
+  button.disabled = !gameRuntime.isHost;
+  button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
+  const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
+  if (winner) announceWin(winner.name);
 }
 
 async function firebaseClient() {
@@ -164,6 +190,31 @@ async function buildRuntime(gameId) {
         onConnected: ({ roomCode }) => { element('fm-lobby-room-code').textContent = roomCode; },
         onLobby: renderFMLobby,
         onState: (state) => { if (state.status === 'playing') showScreen('fm-gameplay'); },
+      },
+    });
+    return candidate;
+  }
+
+  if (gameId === 'simple-rummy') {
+    const effects = createSimpleRummyEffects({
+      renderCardFace,
+      renderCardBack,
+      renderGameplay: renderSRGameplay,
+      renderResults: renderSRResults,
+      playSound,
+      setEventMessage: setSREventMessage,
+      onFinished: ({ state }) => showSRFinished(state, candidate),
+    });
+    candidate = createSimpleRummyRuntime({
+      database: client.database,
+      uid: client.uid,
+      rules: srRules,
+      effects,
+      callbacks: {
+        ...commonCallbacks,
+        onConnected: ({ roomCode }) => { element('sr-lobby-room-code').textContent = roomCode; },
+        onLobby: renderSRLobby,
+        onState: (state) => { if (state.status === 'playing') showScreen('sr-gameplay'); },
       },
     });
     return candidate;
@@ -332,6 +383,47 @@ function wireFlipAndMatch() {
   mute.addEventListener('change', () => { mute.checked = toggleMute(); });
 }
 
+function wireSimpleRummy() {
+  wireLobbyRemoval('sr-lobby-player-list', 'simple-rummy');
+  element('sr-btn-create-room').addEventListener('click', () => showScreen('sr-create-room'));
+  element('sr-btn-join-room').addEventListener('click', () => showScreen('sr-join-room'));
+  element('sr-btn-back-online').addEventListener('click', () => showScreen('landing-page'));
+  element('sr-btn-back-create').addEventListener('click', () => showScreen('sr-online-choice'));
+  element('sr-btn-back-join').addEventListener('click', () => showScreen('sr-online-choice'));
+
+  element('sr-btn-create-submit').addEventListener('click', (event) => runBusy(event.currentTarget, 'Creating…', async () => {
+    const name = element('sr-create-name').value.trim();
+    if (!name) throw new Error('Please enter your name.');
+    await connectToRoom('simple-rummy', (activeRuntime) => activeRuntime.createRoom({
+      player: { name, emoji: selectedEmoji('sr-create-room') },
+    }));
+  }));
+  element('sr-btn-join-submit').addEventListener('click', (event) => runBusy(event.currentTarget, 'Joining…', async () => {
+    const roomCode = normalizeRoomCode(element('sr-room-code').value);
+    const name = element('sr-join-name').value.trim();
+    if (!name) throw new Error('Please enter your name.');
+    await connectToRoom('simple-rummy', (activeRuntime) => activeRuntime.joinRoom({
+      roomCode, player: { name, emoji: selectedEmoji('sr-join-room') },
+    }));
+  }));
+  element('sr-btn-start-online').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.startRound()));
+  element('sr-btn-leave-lobby').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
+  element('sr-gameplay').addEventListener('click', (event) => {
+    if (activeGameId === 'simple-rummy' && event.target.closest('[data-draw-source], [data-hand-index]')) warmSpeech();
+  });
+  element('sr-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.isHost && runtime.playAgain()));
+  element('sr-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
+  element('sr-btn-share-code').addEventListener('click', () => {
+    if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Simple Rummy', 'simple-rummy')();
+  });
+  element('sr-btn-qr-code').addEventListener('click', () => {
+    if (runtime?.roomCode) showQRCode(runtime.roomCode, 'Simple Rummy', 'simple-rummy');
+  });
+  const mute = element('sr-mute-toggle');
+  mute.checked = isMuted();
+  mute.addEventListener('change', () => { mute.checked = toggleMute(); });
+}
+
 async function restoreSession() {
   for (const gameId of AVAILABLE_IDS) {
     const candidate = await buildRuntime(gameId);
@@ -409,9 +501,11 @@ async function bootstrap() {
   wireEmojiPickers();
   wirePPP();
   wireFlipAndMatch();
+  wireSimpleRummy();
   renderLandingPage(AVAILABLE_GAMES, (gameId) => {
     if (gameId === 'patte-par-patta') showScreen('ppp-online-choice');
     if (gameId === 'flip-and-match') showScreen('fm-online-choice');
+    if (gameId === 'simple-rummy') showScreen('sr-online-choice');
   });
   showScreen('landing-page');
   setupServiceWorkerUpdates().catch((error) => console.warn('[CardGamesMP] Service worker unavailable:', error));
@@ -426,9 +520,14 @@ async function bootstrap() {
       showToast('This room link is missing a valid game. Ask the host to share a new link.', 4000);
       return;
     }
-    const isFlipAndMatch = linkedGame === 'flip-and-match';
-    element(isFlipAndMatch ? 'fm-room-code' : 'room-code-input').value = linkedRoom;
-    showScreen(isFlipAndMatch ? 'fm-join-room' : 'ppp-join-room');
+    const linkedScreens = {
+      'patte-par-patta': { input: 'room-code-input', screen: 'ppp-join-room' },
+      'flip-and-match': { input: 'fm-room-code', screen: 'fm-join-room' },
+      'simple-rummy': { input: 'sr-room-code', screen: 'sr-join-room' },
+    };
+    const linked = linkedScreens[linkedGame];
+    element(linked.input).value = linkedRoom;
+    showScreen(linked.screen);
     return;
   }
 

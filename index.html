@@ -174,6 +174,78 @@
       <div id="fm-ready-indicators" class="ready-indicators" hidden></div>
       <div class="results-actions"><button id="fm-btn-play-again" class="btn primary" type="button">Play Again</button><button id="fm-btn-home" class="btn secondary" type="button">Home</button></div>
     </section>
+
+    <section id="sr-online-choice" class="screen" hidden aria-label="Simple Rummy options">
+      <h2 class="setup-heading">Simple Rummy</h2>
+      <button id="sr-btn-create-room" class="btn primary" type="button">🏠 Create Room</button>
+      <button id="sr-btn-join-room" class="btn secondary" type="button">🚪 Join Room</button>
+      <button id="sr-btn-back-online" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="sr-create-room" class="screen" hidden aria-label="Create a Simple Rummy room">
+      <h2 class="setup-heading">Create Room</h2>
+      <div class="setup-group"><input id="sr-create-name" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input"></div>
+      <div class="setup-group">
+        <label class="setup-label">Choose Avatar</label>
+        <div class="emoji-picker" role="group" aria-label="Select avatar">
+          <button class="emoji-btn selected" type="button" data-emoji="👲">👲</button><button class="emoji-btn" type="button" data-emoji="🧑‍💼">🧑‍💼</button><button class="emoji-btn" type="button" data-emoji="👩‍💼">👩‍💼</button><button class="emoji-btn" type="button" data-emoji="🥷">🥷</button><button class="emoji-btn" type="button" data-emoji="🧙">🧙</button><button class="emoji-btn" type="button" data-emoji="🧝‍♀️">🧝‍♀️</button>
+        </div>
+      </div>
+      <button id="sr-btn-create-submit" class="btn primary" type="button">Create</button>
+      <button id="sr-btn-back-create" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="sr-join-room" class="screen" hidden aria-label="Join a Simple Rummy room">
+      <h2 class="setup-heading">Join Room</h2>
+      <div class="setup-group"><input id="sr-room-code" type="text" maxlength="4" pattern="[A-HJ-NP-Z]{4}" placeholder="Room Code" autocomplete="off" class="text-input" style="text-transform:uppercase"></div>
+      <div class="setup-group"><input id="sr-join-name" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input"></div>
+      <div class="setup-group">
+        <label class="setup-label">Choose Avatar</label>
+        <div class="emoji-picker" role="group" aria-label="Select avatar">
+          <button class="emoji-btn selected" type="button" data-emoji="👲">👲</button><button class="emoji-btn" type="button" data-emoji="🧑‍💼">🧑‍💼</button><button class="emoji-btn" type="button" data-emoji="👩‍💼">👩‍💼</button><button class="emoji-btn" type="button" data-emoji="🥷">🥷</button><button class="emoji-btn" type="button" data-emoji="🧙">🧙</button><button class="emoji-btn" type="button" data-emoji="🧝‍♀️">🧝‍♀️</button>
+        </div>
+      </div>
+      <button id="sr-btn-join-submit" class="btn primary" type="button">Join</button>
+      <button id="sr-btn-back-join" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="sr-lobby" class="screen" hidden aria-label="Simple Rummy lobby">
+      <header class="lobby-header"><h2 class="lobby-title">Game Lobby</h2><p class="room-code-display">Room: <span id="sr-lobby-room-code">----</span></p></header>
+      <ul id="sr-lobby-player-list" class="player-list" aria-label="Players"></ul>
+      <div class="lobby-actions">
+        <button id="sr-btn-share-code" class="btn secondary" type="button">📋 Share Code</button>
+        <button id="sr-btn-qr-code" class="btn secondary" type="button">📱 QR Code</button>
+        <button id="sr-btn-start-online" class="btn primary" type="button" hidden>Start Game</button>
+        <button id="sr-btn-leave-lobby" class="btn secondary back-btn" type="button">← Leave</button>
+        <p id="sr-lobby-waiting" class="lobby-waiting">Waiting for host to start…</p>
+      </div>
+    </section>
+
+    <section id="sr-gameplay" class="screen" hidden aria-label="Simple Rummy game board">
+      <div id="sr-opponents-area" class="sr-players-bar" aria-label="Other players"></div>
+      <div id="sr-event-bar" class="event-bar sr-turn-indicator" aria-live="polite"></div>
+      <div class="sr-piles-area">
+        <div class="sr-piles-row">
+          <div class="sr-pile" aria-label="Draw pile"><div id="sr-draw-pile"></div><span id="sr-draw-count" class="sr-pile-count">Stock: 0</span></div>
+          <div class="sr-pile" aria-label="Discard pile"><div id="sr-discard-pile"></div><span id="sr-discard-count" class="sr-pile-count">Discard: 0</span></div>
+        </div>
+      </div>
+      <div id="sr-draw-result" class="sr-draw-result" aria-live="polite"></div>
+      <div class="sr-hand-area" aria-label="Your hand">
+        <div class="sr-self-summary"><span id="sr-self-name"></span><span id="sr-self-count"></span></div>
+        <div id="sr-hand" class="sr-arc"></div>
+      </div>
+      <div class="game-controls"><label class="mute-toggle" for="sr-mute-toggle"><input id="sr-mute-toggle" type="checkbox"> 🔇 Mute</label></div>
+    </section>
+
+    <section id="sr-results" class="screen" hidden aria-label="Simple Rummy results">
+      <header class="results-header"><h2 class="results-title">🏆 Game Over!</h2></header>
+      <div id="sr-winner-display" class="winner-display" aria-label="Winner"></div>
+      <div id="sr-win-groups" class="sr-win-groups" aria-label="Winning groups"></div>
+      <ul id="sr-results-list" class="results-bounty-list" aria-label="Results"></ul>
+      <div id="sr-ready-indicators" class="ready-indicators" hidden></div>
+      <div class="results-actions"><button id="sr-btn-play-again" class="btn primary" type="button">Play Again</button><button id="sr-btn-home" class="btn secondary" type="button">Home</button></div>
+    </section>
   </div>
 
   <aside id="update-toast" class="update-toast" hidden role="status" aria-live="polite" aria-busy="false">
