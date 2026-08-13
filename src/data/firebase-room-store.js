@@ -220,11 +220,11 @@ export function createFirebaseRoomStore({
     }
   }
 
-  async function transactExistingRoom(operation, update) {
+  async function transactExistingRoom(operation, update, transactionRef = roomRef()) {
     requireFunction(update, 'transaction update');
     const stopPriming = await primeExistingRoom(operation);
     try {
-      return await transact(roomRef(), update, { applyLocally: false });
+      return await transact(transactionRef, update, { applyLocally: false });
     } finally {
       stopPriming();
     }
@@ -327,19 +327,52 @@ export function createFirebaseRoomStore({
   async function joinRoom({ player = {} } = {}) {
     const joinedAt = now();
     const safePlayer = cleanPlayerData(player);
+    let initialRoom;
+    try {
+      initialRoom = (await readValue(roomRef())).val();
+    } catch (error) {
+      throw lifecycleError(error, 'join-room-read');
+    }
+    if (!initialRoom) throw new RoomNotFoundError();
+
+    const initialPlayers = initialRoom.players || {};
+    for (let index = 0; index < SLOT_COUNT; index += 1) {
+      const existing = initialPlayers[slotId(index)];
+      if (existing?.uid !== playerUid) continue;
+      const profileChanged = Object.entries(safePlayer)
+        .some(([key, value]) => !sameValue(existing[key], value));
+      if (profileChanged) {
+        throw new RoomLifecycleError(
+          'identity-already-in-room',
+          'This authenticated identity already owns another player in the room',
+        );
+      }
+      return {
+        playerIndex: index,
+        slotId: slotId(index),
+        idempotent: true,
+        room: decodeRoom(initialRoom),
+      };
+    }
+    if (initialRoom.meta?.status === 'closed') {
+      throw new RoomLifecycleError('room-closed', 'Join rejected: room-closed');
+    }
+    if (initialRoom.meta?.status !== 'waiting') {
+      throw new RoomLifecycleError('room-not-joinable', 'Join rejected: room-not-joinable');
+    }
+
     let rejectionCode = 'transaction-aborted';
     let joinedIndex = -1;
     let idempotent = false;
     let result;
-
     try {
-      result = await transactExistingRoom('join-room', (currentRoom) => {
+      result = await transactExistingRoom('join-room', (currentPlayers) => {
         rejectionCode = 'transaction-aborted';
         joinedIndex = -1;
         idempotent = false;
-        if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
+        if (!currentPlayers) { rejectionCode = 'room-not-found'; return undefined; }
 
-        const players = currentRoom.players || {};
+        const players = { ...currentPlayers };
         for (let index = 0; index < SLOT_COUNT; index += 1) {
           const existing = players[slotId(index)];
           if (existing?.uid !== playerUid) continue;
@@ -351,42 +384,36 @@ export function createFirebaseRoomStore({
           }
           joinedIndex = index;
           idempotent = true;
-          return currentRoom;
-        }
-
-        if (currentRoom.meta?.status === 'closed') {
-          rejectionCode = 'room-closed';
-          return undefined;
-        }
-        if (currentRoom.meta?.status !== 'waiting') {
-          rejectionCode = 'room-not-joinable';
-          return undefined;
+          return currentPlayers;
         }
 
         for (let index = 0; index < maxPlayers; index += 1) {
           const key = slotId(index);
           if (players[key]) continue;
           joinedIndex = index;
-          return {
-            ...currentRoom,
-            players: {
-              ...players,
-              [key]: {
-                ...safePlayer,
-                uid: playerUid,
-                index,
-                slotId: key,
-                isHost: false,
-                joinedAt,
-              },
-            },
-            meta: { ...currentRoom.meta, lastActivity: joinedAt },
+          players[key] = {
+            ...safePlayer,
+            uid: playerUid,
+            index,
+            slotId: key,
+            isHost: false,
+            joinedAt,
           };
+          return players;
         }
         rejectionCode = 'room-full';
         return undefined;
-      });
+      }, childRef('players'));
     } catch (error) {
+      let latestRoom = null;
+      try { latestRoom = (await readValue(roomRef())).val(); } catch (_) { /* preserve the original error */ }
+      if (!latestRoom) throw new RoomNotFoundError();
+      if (latestRoom.meta?.status === 'closed') {
+        throw new RoomLifecycleError('room-closed', 'Join rejected: room-closed');
+      }
+      if (latestRoom.meta?.status !== 'waiting') {
+        throw new RoomLifecycleError('room-not-joinable', 'Join rejected: room-not-joinable');
+      }
       throw lifecycleError(error, 'join-room');
     }
 
@@ -396,7 +423,7 @@ export function createFirebaseRoomStore({
       throw new RoomLifecycleError(rejectionCode, `Join rejected: ${rejectionCode}`);
     }
 
-    const room = decodeRoom(result.snapshot.val());
+    const room = await readRoom();
     const key = slotId(joinedIndex);
     if (joinedIndex < 0 || room.players?.[key]?.uid !== playerUid) {
       throw new RoomOwnershipError('slot-claim-lost', 'Joined slot ownership could not be confirmed');
