@@ -10,6 +10,12 @@ import { createSimpleRummyDiscardTransitionValidator } from './discard-transitio
 
 const GAME_ID = 'simple-rummy';
 const MAX_PLAYERS = 4;
+const HAND_ORDER_VERSION = 1;
+const RANK_ORDER = Object.freeze({
+  A: 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7,
+  '8': 8, '9': 9, '10': 10, J: 11, Q: 12, K: 13,
+});
+const SUIT_ORDER = Object.freeze({ '♠': 0, '♥': 1, '♦': 2, '♣': 3 });
 
 function requireFunction(value, name) {
   if (typeof value !== 'function') throw new TypeError(`${name} must be a function`);
@@ -93,8 +99,115 @@ export function createSimpleRummyRuntime({
   let disposed = false;
   let reconcileChain = Promise.resolve();
   let rosterRefreshQueued = false;
+  let handOrderKey = null;
+  let handOrder = [];
 
   const reportError = (error) => callbacks.onError?.(error);
+
+  const sameOrder = (left, right) => left.length === right.length
+    && left.every((cardId, index) => cardId === right[index]);
+
+  const loadHandOrder = (key) => {
+    if (!key) return [];
+    try {
+      const value = JSON.parse(storage.getItem(key));
+      if (value?.version !== HAND_ORDER_VERSION || !Array.isArray(value.order)) return [];
+      const unique = new Set();
+      return value.order.filter((cardId) => {
+        if (typeof cardId !== 'string' || !cardId || unique.has(cardId)) return false;
+        unique.add(cardId);
+        return true;
+      });
+    } catch (_) {
+      return [];
+    }
+  };
+
+  const persistHandOrder = () => {
+    if (!handOrderKey) return;
+    try {
+      storage.setItem(handOrderKey, JSON.stringify({
+        version: HAND_ORDER_VERSION,
+        order: handOrder,
+      }));
+    } catch (_) { /* visual ordering must never block gameplay */ }
+  };
+
+  const selectHandOrderRound = (room) => {
+    const roundToken = room?.meta?.resetAt ?? room?.game?.prng?.seed ?? null;
+    const nextKey = store && roundToken != null
+      ? `cardgamesmp:ui-order:${GAME_ID}:${encodeURIComponent(uid)}:${encodeURIComponent(store.roomCode)}:${roundToken}`
+      : null;
+    if (nextKey === handOrderKey) return;
+    handOrderKey = nextKey;
+    handOrder = loadHandOrder(nextKey);
+  };
+
+  const reconcileHandOrder = (gameState = state) => {
+    const hand = gameState?.players?.[gamePlayerIndex]?.hand;
+    if (!Array.isArray(hand)) return [];
+    const currentIds = hand.map((card) => card?.id).filter((cardId) => typeof cardId === 'string');
+    const currentSet = new Set(currentIds);
+    const reconciled = handOrder.filter((cardId) => currentSet.has(cardId));
+    const included = new Set(reconciled);
+    currentIds.forEach((cardId) => {
+      if (!included.has(cardId)) {
+        reconciled.push(cardId);
+        included.add(cardId);
+      }
+    });
+    if (!sameOrder(reconciled, handOrder)) {
+      handOrder = reconciled;
+      persistHandOrder();
+    }
+    return [...handOrder];
+  };
+
+  const rerenderHandOrder = () => {
+    if (!state) return;
+    // Defer replacement of the dragged node until the browser has emitted the
+    // click that follows pointerup; the old node suppresses that click safely.
+    setTimeout(() => {
+      if (state && !disposed) renderState({ state }).catch(reportError);
+    }, 0);
+  };
+
+  function reorderVisualCard(cardId, targetVisualIndex) {
+    const current = reconcileHandOrder();
+    const sourceIndex = current.indexOf(cardId);
+    if (sourceIndex < 0 || !Number.isInteger(targetVisualIndex)) return;
+    const targetIndex = Math.max(0, Math.min(targetVisualIndex, current.length - 1));
+    if (sourceIndex === targetIndex) return;
+    current.splice(sourceIndex, 1);
+    current.splice(targetIndex, 0, cardId);
+    handOrder = current;
+    persistHandOrder();
+    rerenderHandOrder();
+  }
+
+  function sortVisualCards(mode) {
+    if (mode !== 'rank' && mode !== 'suit') return;
+    const current = reconcileHandOrder();
+    const cards = new Map(
+      (state?.players?.[gamePlayerIndex]?.hand || []).map((card) => [card.id, card]),
+    );
+    const compare = (leftId, rightId) => {
+      const left = cards.get(leftId);
+      const right = cards.get(rightId);
+      if (!left || !right) return left ? -1 : right ? 1 : leftId.localeCompare(rightId);
+      const rankDifference = (RANK_ORDER[left.rank] ?? 99) - (RANK_ORDER[right.rank] ?? 99);
+      const suitDifference = (SUIT_ORDER[left.suit] ?? 99) - (SUIT_ORDER[right.suit] ?? 99);
+      const primary = mode === 'rank' ? rankDifference : suitDifference;
+      const secondary = mode === 'rank' ? suitDifference : rankDifference;
+      return primary || secondary || (left.deckIndex ?? 0) - (right.deckIndex ?? 0)
+        || left.id.localeCompare(right.id);
+    };
+    const sorted = [...current].sort(compare);
+    if (sameOrder(sorted, handOrder)) return;
+    handOrder = sorted;
+    persistHandOrder();
+    rerenderHandOrder();
+  }
 
   const expectedRoster = (room) => room?.expectedRoster || room?.meta?.expectedRoster || null;
 
@@ -104,6 +217,7 @@ export function createSimpleRummyRuntime({
     gamePlayerIndex = Array.isArray(slots)
       ? slots.indexOf(`player_${roomSlotIndex}`)
       : roomSlotIndex;
+    selectHandOrderRound(room);
   };
 
   const ownsSeat = (room) => {
@@ -113,12 +227,18 @@ export function createSimpleRummyRuntime({
     return !roster || roster[slot] == null || roster[slot] === uid;
   };
 
-  const renderState = (parameters = {}) => effects.render({
-    ...parameters,
-    playerIndex: gamePlayerIndex,
-    onDraw: drawLocal,
-    onDiscard: discardLocal,
-  });
+  const renderState = (parameters = {}) => {
+    const renderableState = parameters.state || state;
+    return effects.render({
+      ...parameters,
+      playerIndex: gamePlayerIndex,
+      handOrder: reconcileHandOrder(renderableState),
+      onDraw: drawLocal,
+      onDiscard: discardLocal,
+      onSort: sortVisualCards,
+      onReorder: reorderVisualCard,
+    });
+  };
 
   const coordinator = createActionCoordinator({
     onError: reportError,

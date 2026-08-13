@@ -74,25 +74,137 @@ function renderDiscardPile(state, canDraw, onDraw) {
   if (count) count.textContent = `Discard: ${state.discardPile.length}`;
 }
 
-function renderLocalHand(state, localPlayerIndex, canDiscard, onDiscard) {
+function renderLocalHand(state, localPlayerIndex, canDiscard, onDiscard, controls = {}) {
   const container = clear(document.getElementById('sr-hand'));
   const player = state.players[localPlayerIndex];
   if (!container || !player) return;
-  player.hand.forEach((card, handIndex) => {
-    const cardElement = renderCardFace(card);
-    cardElement.classList.add('sr-arc-card');
-    cardElement.dataset.handIndex = String(handIndex);
-    cardElement.dataset.cardId = card.id;
-    if (canDiscard) {
-      cardElement.classList.add('sr-discardable');
-      cardElement.addEventListener('click', () => onDiscard?.(handIndex));
+
+  const byId = new Map(player.hand.map((card, handIndex) => [card.id, { card, handIndex }]));
+  const ordered = [];
+  const included = new Set();
+  const requestedOrder = Array.isArray(controls.handOrder) ? controls.handOrder : [];
+  requestedOrder.forEach((cardId) => {
+    const entry = byId.get(cardId);
+    if (entry && !included.has(cardId)) {
+      ordered.push(entry);
+      included.add(cardId);
     }
+  });
+  player.hand.forEach((card, handIndex) => {
+    if (!included.has(card.id)) ordered.push({ card, handIndex });
+  });
+
+  const cardElements = [];
+  let drag = null;
+  let suppressDiscardUntil = 0;
+
+  const clearDragStyles = () => {
+    cardElements.forEach((element) => {
+      element.classList.remove('sr-card-dragging', 'sr-card-drop-target');
+    });
+  };
+
+  const nearestVisualIndex = (clientX) => {
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    cardElements.forEach((element, index) => {
+      const rect = element.getBoundingClientRect();
+      const distance = Math.abs(clientX - (rect.left + rect.width / 2));
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    });
+    return nearestIndex;
+  };
+
+  const finishDrag = (event, cancelled = false) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const completed = drag.moved;
+    const { source, cardId, targetVisualIndex } = drag;
+    drag = null;
+    try {
+      if (source.hasPointerCapture?.(event.pointerId)) source.releasePointerCapture(event.pointerId);
+    } catch (_) { /* pointer capture may already be released */ }
+    clearDragStyles();
+    if (!completed) return;
+    suppressDiscardUntil = Date.now() + 500;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!cancelled) controls.onReorder?.(cardId, targetVisualIndex);
+  };
+
+  ordered.forEach(({ card, handIndex }, visualIndex) => {
+    const cardElement = renderCardFace(card);
+    cardElement.classList.add('sr-arc-card', 'sr-reorderable');
+    cardElement.dataset.handIndex = String(handIndex);
+    cardElement.dataset.visualIndex = String(visualIndex);
+    cardElement.dataset.cardId = card.id;
+    if (canDiscard) cardElement.classList.add('sr-discardable');
+
+    cardElement.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      drag = {
+        pointerId: event.pointerId,
+        cardId: card.id,
+        source: cardElement,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+        targetVisualIndex: visualIndex,
+      };
+      try { cardElement.setPointerCapture(event.pointerId); } catch (_) { /* optional browser API */ }
+    });
+
+    cardElement.addEventListener('pointermove', (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const deltaX = event.clientX - drag.startX;
+      const deltaY = event.clientY - drag.startY;
+      if (!drag.moved) {
+        if (Math.abs(deltaX) < 8 || Math.abs(deltaX) < Math.abs(deltaY)) return;
+        drag.moved = true;
+        drag.source.classList.add('sr-card-dragging');
+      }
+      event.preventDefault();
+      const targetIndex = nearestVisualIndex(event.clientX);
+      drag.targetVisualIndex = targetIndex;
+      cardElements.forEach((element, index) => {
+        element.classList.toggle('sr-card-drop-target', index === targetIndex && element !== drag.source);
+      });
+    });
+
+    cardElement.addEventListener('pointerup', (event) => finishDrag(event));
+    cardElement.addEventListener('pointercancel', (event) => finishDrag(event, true));
+    cardElement.addEventListener('click', (event) => {
+      if (Date.now() < suppressDiscardUntil) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (canDiscard) onDiscard?.(handIndex);
+    });
+
+    cardElements.push(cardElement);
     container.appendChild(cardElement);
   });
+
   const name = document.getElementById('sr-self-name');
   if (name) name.textContent = `${player.emoji || '😀'} ${player.name || 'You'}`;
   const count = document.getElementById('sr-self-count');
   if (count) count.textContent = `🃏 ${player.hand.length}`;
+}
+
+function wireSortControls(onSort, enabled) {
+  const rankButton = document.getElementById('sr-sort-rank');
+  const suitButton = document.getElementById('sr-sort-suit');
+  if (rankButton) {
+    rankButton.disabled = !enabled || typeof onSort !== 'function';
+    rankButton.onclick = () => onSort?.('rank');
+  }
+  if (suitButton) {
+    suitButton.disabled = !enabled || typeof onSort !== 'function';
+    suitButton.onclick = () => onSort?.('suit');
+  }
 }
 
 function renderDrawResult(state, localPlayerIndex, lastMove) {
@@ -116,14 +228,22 @@ function renderDrawResult(state, localPlayerIndex, lastMove) {
   }
 }
 
-export function renderGameplay(state, localPlayerIndex, onDraw, onDiscard, lastMove = null) {
+export function renderGameplay(
+  state,
+  localPlayerIndex,
+  onDraw,
+  onDiscard,
+  lastMove = null,
+  handControls = {},
+) {
   const isLocalTurn = state.currentPlayerIndex === localPlayerIndex;
   const canDraw = state.status === 'playing' && isLocalTurn && state.turnPhase === 'draw';
   const canDiscard = state.status === 'playing' && isLocalTurn && state.turnPhase === 'discard';
   renderOpponents(state, localPlayerIndex);
   renderDrawPile(state, canDraw, onDraw);
   renderDiscardPile(state, canDraw, onDraw);
-  renderLocalHand(state, localPlayerIndex, canDiscard, onDiscard);
+  renderLocalHand(state, localPlayerIndex, canDiscard, onDiscard, handControls);
+  wireSortControls(handControls.onSort, state.status === 'playing');
   renderDrawResult(state, localPlayerIndex, lastMove);
   const bar = document.getElementById('sr-event-bar');
   if (bar) {

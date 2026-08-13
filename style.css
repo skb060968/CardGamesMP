@@ -1162,6 +1162,13 @@ body {
   cursor: default;
 }
 
+/* Keep both pile landing zones stable even while their top card is in flight. */
+#sr-draw-pile,
+#sr-discard-pile {
+  width: var(--card-width);
+  height: var(--card-height);
+}
+
 .sr-pile-tappable {
   cursor: pointer;
 }
@@ -1207,7 +1214,22 @@ body {
   display: flex;
   justify-content: center;
   gap: 8px;
-  padding: 0 0 2px;
+  padding: 2px 0;
+  width: 100%;
+}
+
+.sr-sort-btn {
+  width: auto;
+  min-width: 112px;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+}
+
+.sr-reorder-hint {
+  min-height: 14px;
+  font-size: 0.65rem;
+  opacity: 0.6;
+  text-align: center;
 }
 
 .sr-arc {
@@ -1215,6 +1237,9 @@ body {
   justify-content: center;
   position: relative;
   padding: 16px 4px 0;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .sr-arc-card {
@@ -1222,8 +1247,22 @@ body {
   height: var(--sr-card-h);
   margin-left: -16px;
   transition: transform 0.15s, box-shadow 0.15s;
-  cursor: default;
+  cursor: grab;
   transform-origin: bottom center;
+  touch-action: pan-y;
+  -webkit-user-drag: none;
+}
+
+.sr-arc-card.sr-card-dragging {
+  cursor: grabbing !important;
+  transform: translateY(-14px) scale(1.06);
+  box-shadow: 0 5px 18px rgba(52, 152, 219, 0.85);
+  z-index: 50 !important;
+}
+
+.sr-arc-card.sr-card-drop-target {
+  box-shadow: 0 0 0 3px var(--color-accent), 0 4px 14px rgba(243,156,18,0.75);
+  z-index: 40 !important;
 }
 
 .sr-arc-card:first-child {
