@@ -90,7 +90,13 @@ function renderPot(state) {
 function renderCards(state, localPlayerIndex, revealAll = false, target = 'pk-cards-area') {
   const container = clear(document.getElementById(target));
   if (!container) return;
-  state.players.forEach((player, index) => {
+  const displayOrder = state.players
+    .map((_, index) => index)
+    .filter((index) => index !== localPlayerIndex);
+  if (state.players[localPlayerIndex]) displayOrder.push(localPlayerIndex);
+
+  displayOrder.forEach((index) => {
+    const player = state.players[index];
     const group = document.createElement('div');
     group.className = 'pk-player-cards';
     group.classList.toggle('pk-cards-folded', player.folded);
