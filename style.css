@@ -2957,8 +2957,17 @@ body {
   width: 100%; display: flex; flex-direction: column; align-items: center;
   padding: 2px 0; overflow: visible; --pt-card-w: 46px; --pt-card-h: 64px;
 }
-.pt-sort-row { display: flex; justify-content: center; gap: 8px; padding: 2px 0; width: 100%; }
-.pt-sort-btn { width: auto; min-width: 112px; padding: 6px 10px; font-size: 0.72rem; }
+.pt-sort-row {
+  display: flex; justify-content: center; align-items: center; gap: 10px;
+  padding: 7px 10px; width: min(100%, 310px); border-radius: 12px;
+}
+.pt-arrange-row {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+}
+.pt-arrange-label {
+  font-size: 0.72rem; font-weight: 700; color: var(--color-text-light); opacity: 0.8;
+}
+.pt-sort-btn { width: auto; min-width: 128px; padding: 6px 10px; font-size: 0.72rem; }
 .pt-reorder-hint { min-height: 14px; font-size: 0.65rem; opacity: 0.6; text-align: center; }
 .pt-arc {
   display: flex; justify-content: center; position: relative; padding: 16px 4px 0;

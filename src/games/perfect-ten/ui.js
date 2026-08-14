@@ -216,19 +216,12 @@ function renderLocalHand(state, localPlayerIndex, canDiscard, onDiscard, control
 }
 function wireSortControls(onSort, enabled, onOrderChanged) {
   const rankButton = document.getElementById('pt-sort-rank');
-  const suitButton = document.getElementById('pt-sort-suit');
-  const sort = (mode) => {
-    const nextOrder = onSort?.(mode);
+  if (!rankButton) return;
+  rankButton.disabled = !enabled || typeof onSort !== 'function';
+  rankButton.onclick = () => {
+    const nextOrder = onSort?.('rank');
     if (Array.isArray(nextOrder)) onOrderChanged?.(nextOrder);
   };
-  if (rankButton) {
-    rankButton.disabled = !enabled || typeof onSort !== 'function';
-    rankButton.onclick = () => sort('rank');
-  }
-  if (suitButton) {
-    suitButton.disabled = !enabled || typeof onSort !== 'function';
-    suitButton.onclick = () => sort('suit');
-  }
 }
 
 function renderDrawResult(state, localPlayerIndex, lastMove) {
