@@ -44,11 +44,15 @@ export function createPerfectTenDiscardAction({
           if (!integrity?.valid) throw new Error(integrity?.error || 'Invalid game state');
           const expectedRevision = Number.isSafeInteger(state.revision) ? state.revision : 0;
           const nextState = { ...result.newState, revision: expectedRevision + 1 };
-          return { state, nextState, card, won: result.won === true, expectedRevision };
+          return {
+            state, nextState, card, won: result.won === true,
+            winGroups: null, expectedRevision,
+          };
         },
         commit: (prepared) => sync.commitDiscard({
           moveId, expectedRevision: prepared.expectedRevision, playerIndex, handIndex,
-          card: prepared.card, won: prepared.won, state: prepared.nextState, signal,
+          card: prepared.card, won: prepared.won, winGroups: null,
+          state: prepared.nextState, signal,
         }),
         animate: (prepared) => effects.animateDiscard({
           moveId, playerIndex, handIndex, card: prepared.card,

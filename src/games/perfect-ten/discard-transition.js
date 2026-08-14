@@ -37,8 +37,15 @@ export function createPerfectTenDiscardTransitionValidator(rules) {
     try {
       const result = rules.discardCard(currentState, action.handIndex);
       if (!result?.newState) return { valid: false, reason: 'invalid-discard-result' };
-      if ('won' in action && action.won !== (result.won === true)) {
+      if (!Object.prototype.hasOwnProperty.call(action, 'won')
+        || action.won !== (result.won === true)) {
         return { valid: false, reason: 'win-mismatch' };
+      }
+      if (!Object.prototype.hasOwnProperty.call(action, 'winGroups') || action.winGroups !== null) {
+        return { valid: false, reason: 'win-groups-must-be-null' };
+      }
+      if (Object.prototype.hasOwnProperty.call(result, 'winGroups')) {
+        return { valid: false, reason: 'unexpected-engine-win-groups' };
       }
       const integrity = rules.validateState(result.newState);
       if (!integrity?.valid) return { valid: false, reason: integrity?.error || 'invalid-state' };

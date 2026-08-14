@@ -13,15 +13,8 @@ function center(rect) {
 }
 
 async function animateFloater({
-  documentRef,
-  source,
-  target,
-  face,
-  signal,
-  duration = 450,
-  preserveSource = false,
-  resizeToTarget = false,
-  sourceReplacement,
+  documentRef, source, target, face, signal, duration = 450,
+  preserveSource = false, resizeToTarget = false, sourceReplacement,
 }) {
   if (signal?.aborted) throw abortError();
   if (!source || !target || !face || !documentRef?.body) return;
@@ -31,7 +24,7 @@ async function animateFloater({
   const from = center(sourceRect);
   const to = center(targetRect);
   const floater = face;
-  floater.classList.add('sr-card-floater');
+  floater.classList.add('pt-card-floater');
   Object.assign(floater.style, {
     position: 'fixed', left: `${sourceRect.left}px`, top: `${sourceRect.top}px`,
     width: `${sourceRect.width}px`, height: `${sourceRect.height}px`, margin: '0',
@@ -52,21 +45,14 @@ async function animateFloater({
     if (typeof floater.animate === 'function') {
       const offsetX = resizeToTarget ? targetRect.left - sourceRect.left : to.x - from.x;
       const offsetY = resizeToTarget ? targetRect.top - sourceRect.top : to.y - from.y;
-      const startFrame = {
+      const animation = floater.animate([{
         transform: 'translate(0, 0) rotate(0deg)',
-        width: `${sourceRect.width}px`,
-        height: `${sourceRect.height}px`,
-        opacity: 1,
-      };
-      const endFrame = {
+        width: `${sourceRect.width}px`, height: `${sourceRect.height}px`, opacity: 1,
+      }, {
         transform: `translate(${offsetX}px, ${offsetY}px) rotate(5deg)`,
         width: `${resizeToTarget ? targetRect.width : sourceRect.width}px`,
-        height: `${resizeToTarget ? targetRect.height : sourceRect.height}px`,
-        opacity: 1,
-      };
-      const animation = floater.animate([startFrame, endFrame], {
-        duration, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards',
-      });
+        height: `${resizeToTarget ? targetRect.height : sourceRect.height}px`, opacity: 1,
+      }], { duration, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' });
       const aborted = new Promise((_, reject) => {
         onAbort = () => { animation.cancel(); reject(abortError()); };
         signal?.addEventListener('abort', onAbort, { once: true });
@@ -89,7 +75,7 @@ async function animateFloater({
     floater.remove();
   }
 }
-export function createSimpleRummyEffects({
+export function createPerfectTenEffects({
   document: documentRef = globalThis.document,
   renderCardFace,
   renderCardBack,
@@ -108,9 +94,8 @@ export function createSimpleRummyEffects({
   requireFunction(setEventMessage, 'setEventMessage');
 
   let finishedRevision = null;
-
   const opponentTarget = (playerIndex) => documentRef?.querySelector(
-    `.sr-opponent[data-player-index="${playerIndex}"] .sr-opponent-hand`,
+    `.pt-opponent[data-player-index="${playerIndex}"] .pt-opponent-hand`,
   );
 
   return Object.freeze({
@@ -120,32 +105,31 @@ export function createSimpleRummyEffects({
       playSound('throw');
       const discardDraw = source === 'discardPile';
       const sourceElement = documentRef?.querySelector(
-        discardDraw ? '#sr-discard-pile .card' : '#sr-draw-pile .card',
+        discardDraw ? '#pt-discard-pile .card' : '#pt-draw-pile .card',
       );
       const target = playerIndex === localPlayerIndex
-        ? documentRef?.getElementById('sr-hand')
+        ? documentRef?.getElementById('pt-hand')
         : opponentTarget(playerIndex);
       const reveal = playerIndex === localPlayerIndex || discardDraw;
-      const face = reveal ? renderCardFace(card) : renderCardBack();
+      const fallbackPile = Array.isArray(fromState?.discardPile)
+        ? fromState.discardPile.slice(0, -1)
+        : [];
+      const remainingPile = Array.isArray(toState?.discardPile)
+        ? toState.discardPile
+        : fallbackPile;
       let sourceReplacement;
       if (discardDraw) {
-        const fallbackPile = Array.isArray(fromState?.discardPile)
-          ? fromState.discardPile.slice(0, -1)
-          : [];
-        const remainingPile = Array.isArray(toState?.discardPile)
-          ? toState.discardPile
-          : fallbackPile;
         const nextTop = remainingPile[remainingPile.length - 1];
         sourceReplacement = nextTop ? renderCardFace(nextTop) : null;
-        sourceReplacement?.classList.add('sr-pile-card');
-        const count = documentRef?.getElementById('sr-discard-count');
+        sourceReplacement?.classList.add('pt-pile-card');
+        const count = documentRef?.getElementById('pt-discard-count');
         if (count) count.textContent = `Discard: ${remainingPile.length}`;
       }
       await animateFloater({
         documentRef,
         source: sourceElement,
         target,
-        face,
+        face: reveal ? renderCardFace(card) : renderCardBack(),
         signal,
         preserveSource: source === 'drawPile',
         sourceReplacement,
@@ -153,22 +137,18 @@ export function createSimpleRummyEffects({
       setEventMessage(playerIndex === localPlayerIndex ? 'Card drawn — choose a discard' : 'Opponent drew a card');
     },
 
-    async animateDiscard({
-      playerIndex, localPlayerIndex = playerIndex, handIndex, card, signal,
-    }) {
+    async animateDiscard({ playerIndex, localPlayerIndex = playerIndex, handIndex, card, signal }) {
       playSound('throw');
       const sourceElement = playerIndex === localPlayerIndex
-        ? documentRef?.querySelector(`#sr-hand [data-hand-index="${handIndex}"]`)
+        ? documentRef?.querySelector(`#pt-hand [data-hand-index="${handIndex}"]`)
         : documentRef?.querySelector(
-          `.sr-opponent[data-player-index="${playerIndex}"] .sr-opponent-hand .card:last-child`,
+          `.pt-opponent[data-player-index="${playerIndex}"] .pt-opponent-hand .card:last-child`,
         );
-      const target = documentRef?.getElementById('sr-discard-pile');
-      const face = renderCardFace(card);
       await animateFloater({
         documentRef,
         source: sourceElement,
-        target,
-        face,
+        target: documentRef?.getElementById('pt-discard-pile'),
+        face: renderCardFace(card),
         signal,
         resizeToTarget: true,
       });
@@ -177,28 +157,25 @@ export function createSimpleRummyEffects({
 
     async render({
       state, playerIndex, onDraw, onDiscard, onSort, onReorder, handOrder,
-      move, source, card, handIndex, won, winGroups,
+      move, source, card, handIndex, won,
     }) {
-      documentRef?.querySelectorAll('.sr-card-floater').forEach((element) => element.remove());
+      documentRef?.querySelectorAll('.pt-card-floater').forEach((item) => item.remove());
       if (state.status === 'finished') {
         renderResults(state);
         if (finishedRevision !== state.revision) {
           finishedRevision = state.revision;
-          await onFinished({ state, playerIndex, won: won === true, winGroups: winGroups ?? state.winGroups });
+          await onFinished({ state, playerIndex, won: won === true });
         }
         return;
       }
       finishedRevision = null;
       let lastMove = move || null;
-      if (!lastMove && source) {
-        lastMove = { type: 'draw-card', playerIndex, source, card };
-      } else if (!lastMove && Number.isInteger(handIndex)) {
+      if (!lastMove && source) lastMove = { type: 'draw-card', playerIndex, source, card };
+      else if (!lastMove && Number.isInteger(handIndex)) {
         lastMove = { type: 'discard-card', playerIndex, handIndex, card };
       }
       renderGameplay(state, playerIndex, onDraw, onDiscard, lastMove, {
-        handOrder,
-        onSort,
-        onReorder,
+        handOrder, onSort, onReorder,
       });
     },
   });

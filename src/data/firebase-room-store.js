@@ -465,6 +465,7 @@ export function createFirebaseRoomStore({
         revision: handlers.onRevision,
         move: handlers.onMove,
         status: handlers.onStatus,
+        reset: handlers.onReset,
         player: handlers.onPlayer,
       }[event.type];
       if (typeof callback === 'function') callback(event.value, event);
@@ -473,6 +474,7 @@ export function createFirebaseRoomStore({
       ['game', 'revision'],
       ['lastMove', 'move'],
       ['meta/status', 'status'],
+      ['meta/resetAt', 'reset'],
       ...Array.from({ length: SLOT_COUNT }, (_, index) => [`players/${slotId(index)}`, 'player', index]),
     ];
     const unsubscribers = listeners.map(([path, type, playerIndex]) => listenValue(

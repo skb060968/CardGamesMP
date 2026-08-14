@@ -36,18 +36,21 @@ function compactFirebaseValue(value) {
   return Object.keys(result).length === 0 ? null : result;
 }
 
-function waitingState() {
+function waitingState(includeWinGroups = true) {
   return {
     status: 'waiting', revision: 0, players: [], playerSlots: [], drawPile: [],
     discardPile: [], currentPlayerIndex: 0, turnPhase: 'draw', winnerIndex: null,
-    winGroups: null, deckCount: 0, deckSize: 0, prng: null,
+    ...(includeWinGroups ? { winGroups: null } : {}),
+    deckCount: 0, deckSize: 0, prng: null,
   };
 }
 
-function decodeGameState(value) {
+function decodeGameState(value, includeWinGroups = true) {
   const source = value && typeof value === 'object' ? value : {};
+  const decodedSource = { ...source };
+  if (!includeWinGroups) delete decodedSource.winGroups;
   return {
-    ...source,
+    ...decodedSource,
     players: firebaseArray(source.players).map((player) => ({
       ...player,
       hand: firebaseArray(player?.hand),
@@ -56,9 +59,11 @@ function decodeGameState(value) {
     drawPile: firebaseArray(source.drawPile),
     discardPile: firebaseArray(source.discardPile),
     winnerIndex: source.winnerIndex ?? null,
-    winGroups: source.winGroups == null
-      ? null
-      : firebaseArray(source.winGroups).map((group) => firebaseArray(group)),
+    ...(includeWinGroups ? {
+      winGroups: source.winGroups == null
+        ? null
+        : firebaseArray(source.winGroups).map((group) => firebaseArray(group)),
+    } : {}),
   };
 }
 
@@ -76,6 +81,12 @@ export function createSimpleRummyRuntime({
   roomStoreFactory = createFirebaseRoomStore,
   codeGenerator = generateRoomCode,
   callbacks = {},
+  gameId = GAME_ID,
+  includeWinGroups = true,
+  createDrawAction = createSimpleRummyDrawAction,
+  createDiscardAction = createSimpleRummyDiscardAction,
+  createDrawTransitionValidator = createSimpleRummyDrawTransitionValidator,
+  createDiscardTransitionValidator = createSimpleRummyDiscardTransitionValidator,
 }) {
   requireFunction(rules?.createGame, 'rules.createGame');
   requireFunction(rules?.drawCard, 'rules.drawCard');
@@ -87,8 +98,14 @@ export function createSimpleRummyRuntime({
   requireFunction(effects?.render, 'effects.render');
   requireFunction(roomStoreFactory, 'roomStoreFactory');
   requireFunction(codeGenerator, 'codeGenerator');
+  requireFunction(createDrawAction, 'createDrawAction');
+  requireFunction(createDiscardAction, 'createDiscardAction');
+  requireFunction(createDrawTransitionValidator, 'createDrawTransitionValidator');
+  requireFunction(createDiscardTransitionValidator, 'createDiscardTransitionValidator');
+  if (typeof gameId !== 'string' || !gameId) throw new TypeError('gameId must be a non-empty string');
+  if (typeof includeWinGroups !== 'boolean') throw new TypeError('includeWinGroups must be boolean');
 
-  const sessions = createGameSessionStore(GAME_ID, storage);
+  const sessions = createGameSessionStore(gameId, storage);
   let state = null;
   let store = null;
   let roomSlotIndex = -1;
@@ -136,7 +153,7 @@ export function createSimpleRummyRuntime({
   const selectHandOrderRound = (room) => {
     const roundToken = room?.meta?.resetAt ?? room?.game?.prng?.seed ?? null;
     const nextKey = store && roundToken != null
-      ? `cardgamesmp:ui-order:${GAME_ID}:${encodeURIComponent(uid)}:${encodeURIComponent(store.roomCode)}:${roundToken}`
+      ? `cardgamesmp:ui-order:${gameId}:${encodeURIComponent(uid)}:${encodeURIComponent(store.roomCode)}:${roundToken}`
       : null;
     if (nextKey === handOrderKey) return;
     handOrderKey = nextKey;
@@ -289,7 +306,7 @@ export function createSimpleRummyRuntime({
     render: renderState,
   };
 
-  const performDraw = createSimpleRummyDrawAction({
+  const performDraw = createDrawAction({
     coordinator, rules, sync, effects: actionEffects,
     getState: () => state,
     setState: (nextState) => {
@@ -297,7 +314,7 @@ export function createSimpleRummyRuntime({
       callbacks.onState?.(state, { remote: false });
     },
   });
-  const performDiscard = createSimpleRummyDiscardAction({
+  const performDiscard = createDiscardAction({
     coordinator, rules, sync, effects: actionEffects,
     getState: () => state,
     setState: (nextState) => {
@@ -306,8 +323,8 @@ export function createSimpleRummyRuntime({
     },
   });
 
-  const validateDraw = createSimpleRummyDrawTransitionValidator(rules);
-  const validateDiscard = createSimpleRummyDiscardTransitionValidator(rules);
+  const validateDraw = createDrawTransitionValidator(rules);
+  const validateDiscard = createDiscardTransitionValidator(rules);
   const validateTransition = (parameters) => {
     if (parameters?.action?.type === 'draw-card') return validateDraw(parameters);
     if (parameters?.action?.type === 'discard-card') return validateDiscard(parameters);
@@ -325,12 +342,12 @@ export function createSimpleRummyRuntime({
 
   const makeStore = (roomCode) => roomStoreFactory({
     database,
-    gameId: GAME_ID,
+    gameId,
     roomCode: normalizeRoomCode(roomCode),
     playerUid: uid,
     maxPlayers: MAX_PLAYERS,
     encodeState: encodeGameState,
-    decodeState: decodeGameState,
+    decodeState: (value) => decodeGameState(value, includeWinGroups),
     generateRoomCode: () => normalizeRoomCode(codeGenerator(), 'generated roomCode'),
     validateTransition,
   });
@@ -367,7 +384,7 @@ export function createSimpleRummyRuntime({
     callbacks.onDisconnected?.(details);
   }
 
-  async function refreshRoom(move = null) {
+  async function refreshRoom(move = null, { forceSnapshot = false } = {}) {
     if (!store || disposed) return;
     let room;
     try {
@@ -384,16 +401,18 @@ export function createSimpleRummyRuntime({
     updateIdentity(room);
     if (room.meta?.status === 'active' && room.game) {
       const incoming = room.game;
-      if (state && incoming.revision <= state.revision) return;
+      if (!forceSnapshot && state && incoming.revision <= state.revision) return;
       const exactlyNext = state && incoming.revision === state.revision + 1;
-      if (move?.id && exactlyNext) {
+      if (!forceSnapshot && move?.id && exactlyNext) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
       } else {
         state = incoming;
         try {
           await renderState({ state, move: null });
         } finally {
-          callbacks.onState?.(state, { remote: true, move: null, snapshot: true });
+          callbacks.onState?.(state, {
+            remote: true, move: null, snapshot: true, reset: forceSnapshot,
+          });
         }
       }
       return;
@@ -412,6 +431,7 @@ export function createSimpleRummyRuntime({
     unsubscribeRoom = store.subscribeRoom({
       onMove: (move) => enqueue(() => refreshRoom(move?.id ? move : null)),
       onStatus: () => enqueue(() => refreshRoom()),
+      onReset: () => enqueue(() => refreshRoom(null, { forceSnapshot: true })),
       onPlayer: queueRosterRefresh,
       onError: reportError,
     });
@@ -436,7 +456,9 @@ export function createSimpleRummyRuntime({
   async function createRoom({ player }) {
     if (store || disposed) throw new Error('Runtime cannot create another room');
     const activeStore = makeStore(codeGenerator());
-    const created = await activeStore.createRoom({ state: waitingState(), player, status: 'waiting' });
+    const created = await activeStore.createRoom({
+      state: waitingState(includeWinGroups), player, status: 'waiting',
+    });
     return attach(activeStore, created.playerIndex, created.room);
   }
 

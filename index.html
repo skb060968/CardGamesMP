@@ -251,6 +251,81 @@
       <div id="sr-ready-indicators" class="ready-indicators" hidden></div>
       <div class="results-actions"><button id="sr-btn-play-again" class="btn primary" type="button">Play Again</button><button id="sr-btn-home" class="btn secondary" type="button">Home</button></div>
     </section>
+
+    <section id="pt-online-choice" class="screen" hidden aria-label="Perfect Ten options">
+      <h2 class="setup-heading">Perfect Ten</h2>
+      <button id="pt-btn-create-room" class="btn primary" type="button">🏠 Create Room</button>
+      <button id="pt-btn-join-room" class="btn secondary" type="button">🚪 Join Room</button>
+      <button id="pt-btn-back-online" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="pt-create-room" class="screen" hidden aria-label="Create a Perfect Ten room">
+      <h2 class="setup-heading">Create Room</h2>
+      <div class="setup-group"><input id="pt-create-name" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input"></div>
+      <div class="setup-group">
+        <label class="setup-label">Choose Avatar</label>
+        <div class="emoji-picker" role="group" aria-label="Select avatar">
+          <button class="emoji-btn selected" type="button" data-emoji="👲">👲</button><button class="emoji-btn" type="button" data-emoji="🧑‍💼">🧑‍💼</button><button class="emoji-btn" type="button" data-emoji="👩‍💼">👩‍💼</button><button class="emoji-btn" type="button" data-emoji="🥷">🥷</button><button class="emoji-btn" type="button" data-emoji="🧙">🧙</button><button class="emoji-btn" type="button" data-emoji="🧝‍♀️">🧝‍♀️</button>
+        </div>
+      </div>
+      <button id="pt-btn-create-submit" class="btn primary" type="button">Create</button>
+      <button id="pt-btn-back-create" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="pt-join-room" class="screen" hidden aria-label="Join a Perfect Ten room">
+      <h2 class="setup-heading">Join Room</h2>
+      <div class="setup-group"><input id="pt-room-code" type="text" maxlength="4" pattern="[A-HJ-NP-Z]{4}" placeholder="Room Code" autocomplete="off" class="text-input" style="text-transform:uppercase"></div>
+      <div class="setup-group"><input id="pt-join-name" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input"></div>
+      <div class="setup-group">
+        <label class="setup-label">Choose Avatar</label>
+        <div class="emoji-picker" role="group" aria-label="Select avatar">
+          <button class="emoji-btn selected" type="button" data-emoji="👲">👲</button><button class="emoji-btn" type="button" data-emoji="🧑‍💼">🧑‍💼</button><button class="emoji-btn" type="button" data-emoji="👩‍💼">👩‍💼</button><button class="emoji-btn" type="button" data-emoji="🥷">🥷</button><button class="emoji-btn" type="button" data-emoji="🧙">🧙</button><button class="emoji-btn" type="button" data-emoji="🧝‍♀️">🧝‍♀️</button>
+        </div>
+      </div>
+      <button id="pt-btn-join-submit" class="btn primary" type="button">Join</button>
+      <button id="pt-btn-back-join" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="pt-lobby" class="screen" hidden aria-label="Perfect Ten lobby">
+      <header class="lobby-header"><h2 class="lobby-title">Game Lobby</h2><p class="room-code-display">Room: <span id="pt-lobby-room-code">----</span></p></header>
+      <ul id="pt-lobby-player-list" class="player-list" aria-label="Players"></ul>
+      <div class="lobby-actions">
+        <button id="pt-btn-share-code" class="btn secondary" type="button">📋 Share Code</button>
+        <button id="pt-btn-qr-code" class="btn secondary" type="button">📱 QR Code</button>
+        <button id="pt-btn-start-online" class="btn primary" type="button" hidden>Start Game</button>
+        <button id="pt-btn-leave-lobby" class="btn secondary back-btn" type="button">← Leave</button>
+        <p id="pt-lobby-waiting" class="lobby-waiting">Waiting for host to start…</p>
+      </div>
+    </section>
+
+    <section id="pt-gameplay" class="screen" hidden aria-label="Perfect Ten game board">
+      <div id="pt-opponents-area" class="pt-players-bar" aria-label="Other players"></div>
+      <div id="pt-event-bar" class="event-bar pt-turn-indicator" aria-live="polite"></div>
+      <div class="pt-piles-area"><div class="pt-piles-row">
+        <div class="pt-pile" aria-label="Draw pile"><div id="pt-draw-pile"></div><span id="pt-draw-count" class="pt-pile-count">Stock: 0</span></div>
+        <div class="pt-pile" aria-label="Discard pile"><div id="pt-discard-pile"></div><span id="pt-discard-count" class="pt-pile-count">Discard: 0</span></div>
+      </div></div>
+      <div id="pt-draw-result" class="pt-draw-result" aria-live="polite"></div>
+      <div id="pt-rank-tracker-area" class="pt-rank-tracker-area" aria-label="Collected ranks"></div>
+      <div class="pt-hand-area" aria-label="Your hand">
+        <div class="pt-self-summary"><span id="pt-self-name"></span><span id="pt-self-count"></span></div>
+        <div id="pt-hand" class="pt-arc"></div>
+        <div class="pt-sort-row" role="group" aria-label="Arrange your hand">
+          <button id="pt-sort-rank" class="btn secondary pt-sort-btn" type="button">🔢 Sort Rank</button>
+          <button id="pt-sort-suit" class="btn secondary pt-sort-btn" type="button">♠ Sort Suit</button>
+        </div>
+        <p class="pt-reorder-hint">Swipe a card sideways to reposition it</p>
+      </div>
+      <div class="game-controls"><label class="mute-toggle" for="pt-mute-toggle"><input id="pt-mute-toggle" type="checkbox"> 🔇 Mute</label></div>
+    </section>
+
+    <section id="pt-results" class="screen" hidden aria-label="Perfect Ten results">
+      <header class="results-header"><h2 class="results-title">🏆 Game Over!</h2></header>
+      <div id="pt-winner-display" class="winner-display" aria-label="Winner"></div>
+      <ul id="pt-results-list" class="results-bounty-list" aria-label="Results"></ul>
+      <div id="pt-ready-indicators" class="ready-indicators" hidden></div>
+      <div class="results-actions"><button id="pt-btn-play-again" class="btn primary" type="button">Play Again</button><button id="pt-btn-home" class="btn secondary" type="button">Home</button></div>
+    </section>
   </div>
 
   <aside id="update-toast" class="update-toast" hidden role="status" aria-live="polite" aria-busy="false">
