@@ -4,9 +4,9 @@ This is an independent hardened multiplayer card-games project. Its source, styl
 
 ## Current foundation
 
-- Six-game registry using images copied into local `public/images`.
+- Six-game registry using images copied into local `public/images`; five games are playable and Bluff remains the final migration.
 - Local `style.css`, game engines/UI modules, shared render/audio utilities, icons, images, sounds, and manifest; no parent-folder build dependency.
-- Shared card-action entry points for draw, flip, throw, discard, and collect.
+- Shared card-action entry points for draw, flip, throw, discard, collect, and Poker betting actions.
 - Commit-safe action execution that always publishes authoritative state after a successful write.
 - Stable, immutable rank/suit sorting with configurable Ace-low or Ace-high policy.
 - One action coordinator per active game session.
@@ -47,7 +47,7 @@ This is an independent hardened multiplayer card-games project. Its source, styl
 
 ## Browser-playable vertical slice
 
-The entry point wires the hardened runtime to local copies of the proven Patte Par Patta engine, UI renderer, audio, sharing, QR, CSS, and visual resources. The page provides landing, create, join, lobby, gameplay, results, session restoration, deep-link joining, mute, share, QR, host round start, Play Again, and leave/home flows. Unmigrated game cards remain explicitly unavailable.
+The entry point wires the hardened runtimes to local copies of the proven Patte Par Patta, Flip & Match, Simple Rummy, Perfect Ten, and Poker engines, UI renderers, audio, sharing, QR, CSS, and visual resources. Each playable game supports landing, create, join, lobby, gameplay, results, session restoration, deep-link joining, mute, share, QR, host round start, Play Again, and leave/home flows. Bluff remains explicitly unavailable.
 
 ## Flip & Match vertical slice
 
@@ -57,11 +57,15 @@ Flip & Match is now the second browser-playable hardened game. It uses a revisio
 
 The isolated build emits `public-new/sw.js` as `/sw.js` instead of using the legacy auto-activating worker. Updates remain waiting until the user chooses Update. The toast shows an `Updating…` progress state, disables duplicate actions, waits for the active runtime action/animation to finish, and then reloads on `controllerchange`. The worker uses a network-first shell and retains a cached root page for offline navigation.
 
-A dedicated, undeployed `CardGamesMP/firebase-rules.json` defines the isolated namespace and validates authenticated creation, waiting-room joins, immutable player identities, host lifecycle changes, stable slots, revisions, throw/flip move shapes, and presence. It does not modify production rules.
+A dedicated, undeployed `CardGamesMP/firebase-rules.json` defines the isolated namespace and validates authenticated creation, waiting-room joins, immutable player identities, host lifecycle changes, stable slots, revisions, game-specific move shapes (including Poker actions), and presence. It does not modify production rules.
 
-## Next slices
+## Poker vertical slice
 
-Migrate Simple Rummy and Perfect Ten using their existing hardened draw/discard action modules, then migrate Bluff and Poker. Shared ready/Play Again coordination and explicit host kick/end-game operations also remain to be implemented.
+Poker is now the fifth browser-playable migrated game. Bet, call, raise, fold, and show moves use the room store’s revision-protected transaction and always reconcile to the authoritative committed snapshot. Seats remain stable at a maximum of four players, Play Again carries chip balances by `slotId`, and results reveal every dealt hand, including folded hands, with winner balance and pot-gain presentation. Hand secrecy is currently a UI-only limitation: opponents’ cards are rendered face down during play, but the synchronized room state still contains all hands for deterministic validation and reveal.
+
+## Next slice
+
+Bluff is the only remaining game migration. Shared ready coordination and explicit host force-end controls are intentionally not part of the migrated Poker flow.
 
 ## Standalone deployment
 
@@ -69,4 +73,4 @@ Migrate Simple Rummy and Perfect Ten using their existing hardened draw/discard 
 - Configure the `VITE_FIREBASE_*` values in Vercel project settings. Local `.env` files are excluded from Git and Vercel uploads.
 - Enable Firebase Authentication → Sign-in method → Anonymous for the dedicated Firebase project.
 - Explicitly deploy this repository's `firebase-rules.json` to the dedicated Realtime Database. The rules contain only the CardGamesMP `card-games-mp` namespace and are not shared with other game projects.
-- Live multiplayer verification should use two browser profiles/devices and cover create, join, start, move synchronization, refresh/reconnect, Play Again, leave, and host room deletion for both available games.
+- Live multiplayer verification should use two browser profiles/devices and cover create, join, start, move synchronization, refresh/reconnect, Play Again, leave, and host room deletion for all five playable games.

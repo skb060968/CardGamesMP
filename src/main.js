@@ -4,6 +4,7 @@ import * as pppRules from './games/patte-par-patta/engine.js';
 import * as fmRules from './games/flip-and-match/engine.js';
 import * as srRules from './games/simple-rummy/engine.js';
 import * as ptRules from './games/perfect-ten/engine.js';
+import * as pkRules from './games/poker/engine.js';
 import {
   renderGameplay as renderPPPGameplay,
   renderLobbyPlayers as renderPPPLobbyPlayers,
@@ -28,6 +29,12 @@ import {
   renderResults as renderPTResults,
   setEventMessage as setPTEventMessage,
 } from './games/perfect-ten/ui.js';
+import {
+  renderGameplay as renderPKGameplay,
+  renderLobbyPlayers as renderPKLobbyPlayers,
+  renderResults as renderPKResults,
+  setEventMessage as setPKEventMessage,
+} from './games/poker/ui.js';
 import { renderCardBack, renderCardFace } from './shared/card-renderer.js';
 import {
   announceCapture, announceWin, initAudio, isMuted,
@@ -40,11 +47,12 @@ import { createPatteParPattaEffects, createPatteParPattaRuntime } from './games/
 import { createFlipAndMatchEffects, createFlipAndMatchRuntime } from './games/flip-and-match/index.js';
 import { createSimpleRummyEffects, createSimpleRummyRuntime } from './games/simple-rummy/index.js';
 import { createPerfectTenEffects, createPerfectTenRuntime } from './games/perfect-ten/index.js';
+import { createPokerEffects, createPokerRuntime } from './games/poker/index.js';
 import { createFirebaseClient } from './platform/firebase-client.js';
 import { createServiceWorkerUpdateClient } from './platform/service-worker-update.js';
 import { GAMES } from './games/registry.js';
 
-const AVAILABLE_IDS = new Set(['patte-par-patta', 'flip-and-match', 'simple-rummy', 'perfect-ten']);
+const AVAILABLE_IDS = new Set(['patte-par-patta', 'flip-and-match', 'simple-rummy', 'perfect-ten', 'poker']);
 const AVAILABLE_GAMES = GAMES.map((game) => ({ ...game, available: AVAILABLE_IDS.has(game.id) }));
 const element = (id) => document.getElementById(id);
 const selectedEmoji = (screenId) =>
@@ -112,6 +120,15 @@ function renderPTLobby({ room, roomCode, isHost }) {
   showScreen('pt-lobby');
 }
 
+function renderPKLobby({ room, roomCode, isHost }) {
+  const entries = roomEntries(room).slice(0, 4);
+  element('pk-lobby-room-code').textContent = roomCode;
+  renderPKLobbyPlayers(entries.map(([, player]) => player), isHost, entries.map(([key]) => key));
+  element('pk-btn-start-online').hidden = !isHost;
+  element('pk-lobby-waiting').hidden = isHost;
+  showScreen('pk-lobby');
+}
+
 function showPPPFinished(state, gameRuntime) {
   showScreen('ppp-results');
   const button = element('btn-play-again');
@@ -142,6 +159,15 @@ function showSRFinished(state, gameRuntime) {
 function showPTFinished(state, gameRuntime) {
   showScreen('pt-results');
   const button = element('pt-btn-play-again');
+  button.disabled = !gameRuntime.isHost;
+  button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
+  const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
+  if (winner) announceWin(winner.name);
+}
+
+function showPKFinished(state, gameRuntime) {
+  showScreen('pk-results');
+  const button = element('pk-btn-play-again');
   button.disabled = !gameRuntime.isHost;
   button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
   const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
@@ -266,6 +292,34 @@ async function buildRuntime(gameId) {
         onConnected: ({ roomCode }) => { element('pt-lobby-room-code').textContent = roomCode; },
         onLobby: renderPTLobby,
         onState: (state) => { if (state.status === 'playing') showScreen('pt-gameplay'); },
+      },
+    });
+    return candidate;
+  }
+
+  if (gameId === 'poker') {
+    const effects = createPokerEffects({
+      renderGameplay: renderPKGameplay,
+      renderResults: renderPKResults,
+      playSound,
+      setEventMessage: setPKEventMessage,
+      onFinished: ({ state }) => showPKFinished(state, candidate),
+    });
+    candidate = createPokerRuntime({
+      database: client.database,
+      uid: client.uid,
+      rules: pkRules,
+      effects,
+      callbacks: {
+        ...commonCallbacks,
+        onBeforeAction: warmSpeech,
+        onActionUnavailable: (result) => {
+          if (result?.reason === 'busy') showToast('Finishing the current Poker action…');
+          else if (result?.reason === 'disposed') showToast('This Poker session has ended.');
+        },
+        onConnected: ({ roomCode }) => { element('pk-lobby-room-code').textContent = roomCode; },
+        onLobby: renderPKLobby,
+        onState: (state) => { if (state.status === 'betting') showScreen('pk-gameplay'); },
       },
     });
     return candidate;
@@ -516,6 +570,44 @@ function wirePerfectTen() {
   mute.addEventListener('change', () => { mute.checked = toggleMute(); });
 }
 
+function wirePoker() {
+  wireLobbyRemoval('pk-lobby-player-list', 'poker');
+  element('pk-btn-create-room').addEventListener('click', () => showScreen('pk-create-room'));
+  element('pk-btn-join-room').addEventListener('click', () => showScreen('pk-join-room'));
+  element('pk-btn-back-online').addEventListener('click', () => showScreen('landing-page'));
+  element('pk-btn-back-create').addEventListener('click', () => showScreen('pk-online-choice'));
+  element('pk-btn-back-join').addEventListener('click', () => showScreen('pk-online-choice'));
+
+  element('pk-btn-create-submit').addEventListener('click', (event) => runBusy(event.currentTarget, 'Creating…', async () => {
+    const name = element('pk-create-name').value.trim();
+    if (!name) throw new Error('Please enter your name.');
+    await connectToRoom('poker', (activeRuntime) => activeRuntime.createRoom({
+      player: { name, emoji: selectedEmoji('pk-create-room') },
+    }));
+  }));
+  element('pk-btn-join-submit').addEventListener('click', (event) => runBusy(event.currentTarget, 'Joining…', async () => {
+    const roomCode = normalizeRoomCode(element('pk-room-code').value);
+    const name = element('pk-join-name').value.trim();
+    if (!name) throw new Error('Please enter your name.');
+    await connectToRoom('poker', (activeRuntime) => activeRuntime.joinRoom({
+      roomCode, player: { name, emoji: selectedEmoji('pk-join-room') },
+    }));
+  }));
+  element('pk-btn-start-online').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.startRound()));
+  element('pk-btn-leave-lobby').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
+  element('pk-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.isHost && runtime.playAgain()));
+  element('pk-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
+  element('pk-btn-share-code').addEventListener('click', () => {
+    if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Poker', 'poker')();
+  });
+  element('pk-btn-qr-code').addEventListener('click', () => {
+    if (runtime?.roomCode) showQRCode(runtime.roomCode, 'Poker', 'poker');
+  });
+  const mute = element('pk-mute-toggle');
+  mute.checked = isMuted();
+  mute.addEventListener('change', () => { mute.checked = toggleMute(); });
+}
+
 async function restoreSession() {
   for (const gameId of AVAILABLE_IDS) {
     const candidate = await buildRuntime(gameId);
@@ -595,11 +687,13 @@ async function bootstrap() {
   wireFlipAndMatch();
   wireSimpleRummy();
   wirePerfectTen();
+  wirePoker();
   renderLandingPage(AVAILABLE_GAMES, (gameId) => {
     if (gameId === 'patte-par-patta') showScreen('ppp-online-choice');
     if (gameId === 'flip-and-match') showScreen('fm-online-choice');
     if (gameId === 'simple-rummy') showScreen('sr-online-choice');
     if (gameId === 'perfect-ten') showScreen('pt-online-choice');
+    if (gameId === 'poker') showScreen('pk-online-choice');
   });
   showScreen('landing-page');
   setupServiceWorkerUpdates().catch((error) => console.warn('[CardGamesMP] Service worker unavailable:', error));
@@ -619,6 +713,7 @@ async function bootstrap() {
       'flip-and-match': { input: 'fm-room-code', screen: 'fm-join-room' },
       'simple-rummy': { input: 'sr-room-code', screen: 'sr-join-room' },
       'perfect-ten': { input: 'pt-room-code', screen: 'pt-join-room' },
+      poker: { input: 'pk-room-code', screen: 'pk-join-room' },
     };
     const linked = linkedScreens[linkedGame];
     element(linked.input).value = linkedRoom;

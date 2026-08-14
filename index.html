@@ -326,6 +326,71 @@
       <div id="pt-ready-indicators" class="ready-indicators" hidden></div>
       <div class="results-actions"><button id="pt-btn-play-again" class="btn primary" type="button">Play Again</button><button id="pt-btn-home" class="btn secondary" type="button">Home</button></div>
     </section>
+
+    <section id="pk-online-choice" class="screen" hidden aria-label="Poker options">
+      <h2 class="setup-heading">Poker</h2>
+      <button id="pk-btn-create-room" class="btn primary" type="button">🏠 Create Room</button>
+      <button id="pk-btn-join-room" class="btn secondary" type="button">🚪 Join Room</button>
+      <button id="pk-btn-back-online" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="pk-create-room" class="screen" hidden aria-label="Create a Poker room">
+      <h2 class="setup-heading">Create Room</h2>
+      <div class="setup-group"><input id="pk-create-name" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input"></div>
+      <div class="setup-group">
+        <label class="setup-label">Choose Avatar</label>
+        <div class="emoji-picker" role="group" aria-label="Select avatar">
+          <button class="emoji-btn selected" type="button" data-emoji="👲">👲</button><button class="emoji-btn" type="button" data-emoji="🧑‍💼">🧑‍💼</button><button class="emoji-btn" type="button" data-emoji="👩‍💼">👩‍💼</button><button class="emoji-btn" type="button" data-emoji="🥷">🥷</button><button class="emoji-btn" type="button" data-emoji="🧙">🧙</button><button class="emoji-btn" type="button" data-emoji="🧝‍♀️">🧝‍♀️</button>
+        </div>
+      </div>
+      <button id="pk-btn-create-submit" class="btn primary" type="button">Create</button>
+      <button id="pk-btn-back-create" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="pk-join-room" class="screen" hidden aria-label="Join a Poker room">
+      <h2 class="setup-heading">Join Room</h2>
+      <div class="setup-group"><input id="pk-room-code" type="text" maxlength="4" pattern="[A-HJ-NP-Z]{4}" placeholder="Room Code" autocomplete="off" class="text-input" style="text-transform:uppercase"></div>
+      <div class="setup-group"><input id="pk-join-name" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input"></div>
+      <div class="setup-group">
+        <label class="setup-label">Choose Avatar</label>
+        <div class="emoji-picker" role="group" aria-label="Select avatar">
+          <button class="emoji-btn selected" type="button" data-emoji="👲">👲</button><button class="emoji-btn" type="button" data-emoji="🧑‍💼">🧑‍💼</button><button class="emoji-btn" type="button" data-emoji="👩‍💼">👩‍💼</button><button class="emoji-btn" type="button" data-emoji="🥷">🥷</button><button class="emoji-btn" type="button" data-emoji="🧙">🧙</button><button class="emoji-btn" type="button" data-emoji="🧝‍♀️">🧝‍♀️</button>
+        </div>
+      </div>
+      <button id="pk-btn-join-submit" class="btn primary" type="button">Join</button>
+      <button id="pk-btn-back-join" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="pk-lobby" class="screen" hidden aria-label="Poker lobby">
+      <header class="lobby-header"><h2 class="lobby-title">Game Lobby</h2><p class="room-code-display">Room: <span id="pk-lobby-room-code">----</span></p></header>
+      <ul id="pk-lobby-player-list" class="player-list" aria-label="Players"></ul>
+      <div class="lobby-actions">
+        <button id="pk-btn-share-code" class="btn secondary" type="button">📋 Share Code</button>
+        <button id="pk-btn-qr-code" class="btn secondary" type="button">📱 QR Code</button>
+        <button id="pk-btn-start-online" class="btn primary" type="button" hidden>Start Game</button>
+        <button id="pk-btn-leave-lobby" class="btn secondary back-btn" type="button">← Leave</button>
+        <p id="pk-lobby-waiting" class="lobby-waiting">Waiting for host to start…</p>
+      </div>
+    </section>
+
+    <section id="pk-gameplay" class="screen" hidden aria-label="Poker game board">
+      <div id="pk-all-players" class="game-all-players" aria-label="Other players"></div>
+      <div id="pk-pot-area" class="pk-pot-area" aria-label="Pot"></div>
+      <div id="pk-cards-area" class="pk-cards-area" aria-label="Player cards"></div>
+      <div id="pk-event-bar" class="event-bar" aria-live="polite"></div>
+      <div id="pk-actions-area" class="pk-actions-area" aria-label="Betting actions"></div>
+      <div id="pk-self-bar" class="game-self-bar" aria-label="Your info">
+        <div class="game-self-info"><span id="pk-self-emoji" class="game-self-emoji"></span><span id="pk-self-name" class="game-self-name"></span></div>
+        <div class="game-self-controls"><label class="mute-toggle" for="pk-mute-toggle"><input id="pk-mute-toggle" type="checkbox"> 🔇 Mute</label></div>
+      </div>
+    </section>
+
+    <section id="pk-results" class="screen" hidden aria-label="Poker results">
+      <header class="results-header"><h2 class="results-title">🏆 Game Over!</h2></header>
+      <div id="pk-winner-display" class="winner-display" aria-label="Winner"></div>
+      <ul id="pk-results-list" class="results-bounty-list" aria-label="All player hands and results"></ul>
+      <div class="results-actions"><button id="pk-btn-play-again" class="btn primary" type="button">Play Again</button><button id="pk-btn-home" class="btn secondary" type="button">Home</button></div>
+    </section>
   </div>
 
   <aside id="update-toast" class="update-toast" hidden role="status" aria-live="polite" aria-busy="false">
