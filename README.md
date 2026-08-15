@@ -4,7 +4,7 @@ This is an independent hardened multiplayer card-games project. Its source, styl
 
 ## Current foundation
 
-- Six-game registry using images copied into local `public/images`; five games are playable and Bluff remains the final migration.
+- Six-game registry using images copied into local `public/images`; all six games are browser-playable.
 - Local `style.css`, game engines/UI modules, shared render/audio utilities, icons, images, sounds, and manifest; no parent-folder build dependency.
 - Shared card-action entry points for draw, flip, throw, discard, collect, and Poker betting actions.
 - Commit-safe action execution that always publishes authoritative state after a successful write.
@@ -47,7 +47,7 @@ This is an independent hardened multiplayer card-games project. Its source, styl
 
 ## Browser-playable vertical slice
 
-The entry point wires the hardened runtimes to local copies of the proven Patte Par Patta, Flip & Match, Simple Rummy, Perfect Ten, and Poker engines, UI renderers, audio, sharing, QR, CSS, and visual resources. Each playable game supports landing, create, join, lobby, gameplay, results, session restoration, deep-link joining, mute, share, QR, host round start, Play Again, and leave/home flows. Bluff remains explicitly unavailable.
+The entry point wires the hardened runtimes to local copies of the proven Patte Par Patta, Flip & Match, Simple Rummy, Perfect Ten, Poker, and Bluff engines, UI renderers, audio, sharing, QR, CSS, and visual resources. All six playable games support landing, create, join, lobby, gameplay, results, session restoration, deep-link joining, mute, share, QR, host round start, Play Again, and leave/home flows.
 
 ## Flip & Match vertical slice
 
@@ -57,15 +57,17 @@ Flip & Match is now the second browser-playable hardened game. It uses a revisio
 
 The isolated build emits `public-new/sw.js` as `/sw.js` instead of using the legacy auto-activating worker. Updates remain waiting until the user chooses Update. The toast shows an `Updating…` progress state, disables duplicate actions, waits for the active runtime action/animation to finish, and then reloads on `controllerchange`. The worker uses a network-first shell and retains a cached root page for offline navigation.
 
-A dedicated, undeployed `CardGamesMP/firebase-rules.json` defines the isolated namespace and validates authenticated creation, waiting-room joins, immutable player identities, host lifecycle changes, stable slots, revisions, game-specific move shapes (including Poker actions), and presence. It does not modify production rules.
+A dedicated, undeployed `CardGamesMP/firebase-rules.json` defines the isolated namespace and validates authenticated creation, waiting-room joins, immutable player identities, host lifecycle changes, stable slots, revisions, game-specific move shapes (including Poker and Bluff actions), and presence. It does not modify production rules.
 
 ## Poker vertical slice
 
 Poker is now the fifth browser-playable migrated game. Bet, call, raise, fold, and show moves use the room store’s revision-protected transaction and always reconcile to the authoritative committed snapshot. Seats remain stable at a maximum of four players, Play Again carries chip balances by `slotId`, and results reveal every dealt hand, including folded hands, with winner balance and pot-gain presentation. Hand secrecy is currently a UI-only limitation: opponents’ cards are rendered face down during play, but the synchronized room state still contains all hands for deterministic validation and reveal.
 
-## Next slice
+## Bluff vertical slice
 
-Bluff is the only remaining game migration. Shared ready coordination and explicit host force-end controls are intentionally not part of the migrated Poker flow.
+Bluff is now the sixth browser-playable migrated game. Place, pass, challenge, and accept actions use one revision-protected transaction whose authority is established by deterministic transition replay, including placement pins for challenge/accept and idempotent `moveId` handling. The engine deterministically shuffles and deals all 52 physical card identities from synchronized PRNG metadata, while each browser may sort or reorder its hand locally without changing authoritative order. Bluff has no gameplay timer, ready coordination, or host force-end control. Opponent cards are hidden by UI convention only: the shared synchronized room state contains every hand and the latest placed cards, so card secrecy is not server-enforced.
+
+The migrated UI intentionally separates authoritative card order from UI-only hand order. Local sorting and drag reordering are persisted per browser/round and never enter the transaction state or affect replay validation.
 
 ## Standalone deployment
 
@@ -73,4 +75,4 @@ Bluff is the only remaining game migration. Shared ready coordination and explic
 - Configure the `VITE_FIREBASE_*` values in Vercel project settings. Local `.env` files are excluded from Git and Vercel uploads.
 - Enable Firebase Authentication → Sign-in method → Anonymous for the dedicated Firebase project.
 - Explicitly deploy this repository's `firebase-rules.json` to the dedicated Realtime Database. The rules contain only the CardGamesMP `card-games-mp` namespace and are not shared with other game projects.
-- Live multiplayer verification should use two browser profiles/devices and cover create, join, start, move synchronization, refresh/reconnect, Play Again, leave, and host room deletion for all five playable games.
+- Live multiplayer verification should use two browser profiles/devices and cover create, join, start, move synchronization, refresh/reconnect, Play Again, leave, and host room deletion for all six playable games.

@@ -5,6 +5,7 @@ import * as fmRules from './games/flip-and-match/engine.js';
 import * as srRules from './games/simple-rummy/engine.js';
 import * as ptRules from './games/perfect-ten/engine.js';
 import * as pkRules from './games/poker/engine.js';
+import * as blRules from './games/bluff/engine.js';
 import {
   renderGameplay as renderPPPGameplay,
   renderLobbyPlayers as renderPPPLobbyPlayers,
@@ -35,6 +36,15 @@ import {
   renderResults as renderPKResults,
   setEventMessage as setPKEventMessage,
 } from './games/poker/ui.js';
+import {
+  clearSelection as clearBLSelection,
+  hideChallengeResult as hideBLChallengeResult,
+  renderChallengeResult as renderBLChallengeResult,
+  renderGameplay as renderBLGameplay,
+  renderLobbyPlayers as renderBLLobbyPlayers,
+  renderResults as renderBLResults,
+  setEventMessage as setBLEventMessage,
+} from './games/bluff/ui.js';
 import { renderCardBack, renderCardFace } from './shared/card-renderer.js';
 import {
   announceCapture, announceWin, initAudio, isMuted,
@@ -48,11 +58,12 @@ import { createFlipAndMatchEffects, createFlipAndMatchRuntime } from './games/fl
 import { createSimpleRummyEffects, createSimpleRummyRuntime } from './games/simple-rummy/index.js';
 import { createPerfectTenEffects, createPerfectTenRuntime } from './games/perfect-ten/index.js';
 import { createPokerEffects, createPokerRuntime } from './games/poker/index.js';
+import { createBluffEffects, createBluffRuntime } from './games/bluff/index.js';
 import { createFirebaseClient } from './platform/firebase-client.js';
 import { createServiceWorkerUpdateClient } from './platform/service-worker-update.js';
 import { GAMES } from './games/registry.js';
 
-const AVAILABLE_IDS = new Set(['patte-par-patta', 'flip-and-match', 'simple-rummy', 'perfect-ten', 'poker']);
+const AVAILABLE_IDS = new Set(['patte-par-patta', 'flip-and-match', 'simple-rummy', 'perfect-ten', 'poker', 'bluff']);
 const AVAILABLE_GAMES = GAMES.map((game) => ({ ...game, available: AVAILABLE_IDS.has(game.id) }));
 const element = (id) => document.getElementById(id);
 const selectedEmoji = (screenId) =>
@@ -129,6 +140,15 @@ function renderPKLobby({ room, roomCode, isHost }) {
   showScreen('pk-lobby');
 }
 
+function renderBLLobby({ room, roomCode, isHost }) {
+  const entries = roomEntries(room).slice(0, 4);
+  element('bl-lobby-room-code').textContent = roomCode;
+  renderBLLobbyPlayers(entries.map(([, player]) => player), isHost, entries.map(([key]) => key));
+  element('bl-btn-start-online').hidden = !isHost;
+  element('bl-lobby-waiting').hidden = isHost;
+  showScreen('bl-lobby');
+}
+
 function showPPPFinished(state, gameRuntime) {
   showScreen('ppp-results');
   const button = element('btn-play-again');
@@ -168,6 +188,15 @@ function showPTFinished(state, gameRuntime) {
 function showPKFinished(state, gameRuntime) {
   showScreen('pk-results');
   const button = element('pk-btn-play-again');
+  button.disabled = !gameRuntime.isHost;
+  button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
+  const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
+  if (winner) announceWin(winner.name);
+}
+
+function showBLFinished(state, gameRuntime) {
+  showScreen('bl-results');
+  const button = element('bl-btn-play-again');
   button.disabled = !gameRuntime.isHost;
   button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
   const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
@@ -320,6 +349,37 @@ async function buildRuntime(gameId) {
         onConnected: ({ roomCode }) => { element('pk-lobby-room-code').textContent = roomCode; },
         onLobby: renderPKLobby,
         onState: (state) => { if (state.status === 'betting') showScreen('pk-gameplay'); },
+      },
+    });
+    return candidate;
+  }
+
+  if (gameId === 'bluff') {
+    const effects = createBluffEffects({
+      renderGameplay: renderBLGameplay,
+      renderResults: renderBLResults,
+      renderChallengeResult: renderBLChallengeResult,
+      hideChallengeResult: hideBLChallengeResult,
+      clearSelection: clearBLSelection,
+      setEventMessage: setBLEventMessage,
+      playSound,
+      onFinished: ({ state }) => showBLFinished(state, candidate),
+    });
+    candidate = createBluffRuntime({
+      database: client.database,
+      uid: client.uid,
+      rules: blRules,
+      effects,
+      callbacks: {
+        ...commonCallbacks,
+        onBeforeAction: warmSpeech,
+        onActionUnavailable: (result) => {
+          if (result?.reason === 'busy') showToast('Finishing the current Bluff action…');
+          else if (result?.reason === 'disposed') showToast('This Bluff session has ended.');
+        },
+        onConnected: ({ roomCode }) => { element('bl-lobby-room-code').textContent = roomCode; },
+        onLobby: renderBLLobby,
+        onState: (state) => { if (state.status === 'playing') showScreen('bl-gameplay'); },
       },
     });
     return candidate;
@@ -608,6 +668,44 @@ function wirePoker() {
   mute.addEventListener('change', () => { mute.checked = toggleMute(); });
 }
 
+function wireBluff() {
+  wireLobbyRemoval('bl-lobby-player-list', 'bluff');
+  element('bl-btn-create-room').addEventListener('click', () => showScreen('bl-create-room'));
+  element('bl-btn-join-room').addEventListener('click', () => showScreen('bl-join-room'));
+  element('bl-btn-back-online').addEventListener('click', () => showScreen('landing-page'));
+  element('bl-btn-back-create').addEventListener('click', () => showScreen('bl-online-choice'));
+  element('bl-btn-back-join').addEventListener('click', () => showScreen('bl-online-choice'));
+
+  element('bl-btn-create-submit').addEventListener('click', (event) => runBusy(event.currentTarget, 'Creating…', async () => {
+    const name = element('bl-create-name').value.trim();
+    if (!name) throw new Error('Please enter your name.');
+    await connectToRoom('bluff', (activeRuntime) => activeRuntime.createRoom({
+      player: { name, emoji: selectedEmoji('bl-create-room') },
+    }));
+  }));
+  element('bl-btn-join-submit').addEventListener('click', (event) => runBusy(event.currentTarget, 'Joining…', async () => {
+    const roomCode = normalizeRoomCode(element('bl-room-code').value);
+    const name = element('bl-join-name').value.trim();
+    if (!name) throw new Error('Please enter your name.');
+    await connectToRoom('bluff', (activeRuntime) => activeRuntime.joinRoom({
+      roomCode, player: { name, emoji: selectedEmoji('bl-join-room') },
+    }));
+  }));
+  element('bl-btn-start-online').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.startRound()));
+  element('bl-btn-leave-lobby').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
+  element('bl-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.isHost && runtime.playAgain()));
+  element('bl-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
+  element('bl-btn-share-code').addEventListener('click', () => {
+    if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Bluff', 'bluff')();
+  });
+  element('bl-btn-qr-code').addEventListener('click', () => {
+    if (runtime?.roomCode) showQRCode(runtime.roomCode, 'Bluff', 'bluff');
+  });
+  const mute = element('bl-mute-toggle');
+  mute.checked = isMuted();
+  mute.addEventListener('change', () => { mute.checked = toggleMute(); });
+}
+
 async function restoreSession() {
   for (const gameId of AVAILABLE_IDS) {
     const candidate = await buildRuntime(gameId);
@@ -688,12 +786,14 @@ async function bootstrap() {
   wireSimpleRummy();
   wirePerfectTen();
   wirePoker();
+  wireBluff();
   renderLandingPage(AVAILABLE_GAMES, (gameId) => {
     if (gameId === 'patte-par-patta') showScreen('ppp-online-choice');
     if (gameId === 'flip-and-match') showScreen('fm-online-choice');
     if (gameId === 'simple-rummy') showScreen('sr-online-choice');
     if (gameId === 'perfect-ten') showScreen('pt-online-choice');
     if (gameId === 'poker') showScreen('pk-online-choice');
+    if (gameId === 'bluff') showScreen('bl-online-choice');
   });
   showScreen('landing-page');
   setupServiceWorkerUpdates().catch((error) => console.warn('[CardGamesMP] Service worker unavailable:', error));
@@ -714,6 +814,7 @@ async function bootstrap() {
       'simple-rummy': { input: 'sr-room-code', screen: 'sr-join-room' },
       'perfect-ten': { input: 'pt-room-code', screen: 'pt-join-room' },
       poker: { input: 'pk-room-code', screen: 'pk-join-room' },
+      bluff: { input: 'bl-room-code', screen: 'bl-join-room' },
     };
     const linked = linkedScreens[linkedGame];
     element(linked.input).value = linkedRoom;

@@ -1501,6 +1501,155 @@ export function createFirebaseRoomStore({
     }
   }
 
+  async function commitBluffAction(payload = {}) {
+    try {
+      requireObject(payload, 'Bluff commit payload');
+      const {
+        moveId, expectedRevision, playerIndex, action: actionType,
+        payload: actionPayload, state,
+      } = payload;
+      requireToken(moveId, 'moveId');
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+        throw new TypeError('expectedRevision must be a non-negative safe integer');
+      }
+      if (!Number.isInteger(playerIndex) || playerIndex < 0 || playerIndex >= maxPlayers) {
+        throw new TypeError(`playerIndex must be an integer from 0 through ${maxPlayers - 1}`);
+      }
+      if (!['place', 'pass', 'challenge', 'accept'].includes(actionType)) {
+        throw new TypeError('Unsupported Bluff action');
+      }
+
+      const isExactPayload = (value, keys) => value !== null
+        && typeof value === 'object'
+        && !Array.isArray(value)
+        && Object.keys(value).length === keys.length
+        && Object.keys(value).every((key) => keys.includes(key));
+      if (actionType === 'place') {
+        if (!isExactPayload(actionPayload, ['cardIds', 'declaredRank'])
+          || !Array.isArray(actionPayload.cardIds)
+          || actionPayload.cardIds.length < 1 || actionPayload.cardIds.length > 4
+          || actionPayload.cardIds.some((id) => typeof id !== 'string' || !id)
+          || new Set(actionPayload.cardIds).size !== actionPayload.cardIds.length
+          || typeof actionPayload.declaredRank !== 'string') {
+          throw new TypeError('Invalid Bluff place payload');
+        }
+      } else if (actionType === 'challenge' || actionType === 'accept') {
+        if (!isExactPayload(actionPayload, ['placementMoveId', 'placementRevision'])
+          || typeof actionPayload.placementMoveId !== 'string'
+          || !actionPayload.placementMoveId.trim()
+          || !Number.isSafeInteger(actionPayload.placementRevision)
+          || actionPayload.placementRevision < 1) {
+          throw new TypeError(`Invalid Bluff ${actionType} payload`);
+        }
+      } else if (actionPayload !== null) {
+        throw new TypeError('Bluff pass payload must be null');
+      }
+
+      const safeState = cloneFirebaseValue(state, 'state');
+      const encodedNextState = encodeGame(safeState);
+      const nextState = decodeState(encodedNextState);
+      const safePayload = actionPayload === null
+        ? null
+        : cloneFirebaseValue(actionPayload, 'Bluff action payload');
+      if (nextState.revision !== expectedRevision + 1) {
+        throw new RoomCommitError('invalid-next-revision');
+      }
+
+      const action = {
+        type: 'bluff-action',
+        moveId,
+        expectedRevision,
+        playerIndex,
+        action: actionType,
+        payload: safePayload,
+      };
+      const commitTime = now();
+      let rejectionCode = 'transaction-aborted';
+      let idempotent = false;
+      const result = await transactExistingRoom('commit-bluff-action', (currentRoom) => {
+        rejectionCode = 'transaction-aborted';
+        idempotent = false;
+        if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
+
+        const previousMove = currentRoom.lastMove;
+        if (previousMove?.id === moveId) {
+          const samePayload = safePayload === null
+            ? !Object.prototype.hasOwnProperty.call(previousMove, 'payload')
+            : sameValue(previousMove.payload, safePayload);
+          const sameMove = previousMove.type === 'bluff-action'
+            && previousMove.expectedRevision === expectedRevision
+            && previousMove.revision === nextState.revision
+            && previousMove.playerIndex === playerIndex
+            && previousMove.action === actionType
+            && samePayload
+            && sameValue(currentRoom.game, encodedNextState);
+          if (!sameMove) { rejectionCode = 'move-id-collision'; return undefined; }
+          idempotent = true;
+          return currentRoom;
+        }
+
+        if (currentRoom.meta?.status !== 'active') {
+          rejectionCode = 'room-not-active';
+          return undefined;
+        }
+        let currentState;
+        try {
+          currentState = decodeState(currentRoom.game);
+        } catch (_) {
+          rejectionCode = 'invalid-current-state';
+          return undefined;
+        }
+        rejectionCode = commitSlotRejection(currentRoom, currentState, nextState, playerIndex);
+        if (rejectionCode) return undefined;
+        if (currentState?.revision !== expectedRevision) {
+          rejectionCode = 'revision-conflict';
+          return undefined;
+        }
+
+        let verdict;
+        try {
+          verdict = readVerdict(validateTransition({ currentState, nextState, action }));
+        } catch (_) {
+          verdict = { valid: false, reason: 'transition-validator-failed' };
+        }
+        if (!verdict.valid) {
+          rejectionCode = verdict.reason;
+          return undefined;
+        }
+
+        const lastMove = {
+          id: moveId,
+          type: 'bluff-action',
+          action: actionType,
+          expectedRevision,
+          revision: nextState.revision,
+          playerIndex,
+          createdAt: commitTime,
+        };
+        if (safePayload !== null) lastMove.payload = safePayload;
+        return {
+          ...currentRoom,
+          game: encodedNextState,
+          lastMove,
+          meta: { ...currentRoom.meta, lastActivity: commitTime },
+        };
+      });
+
+      if (!result.committed) {
+        throw new RoomCommitError(rejectionCode, `Bluff commit rejected: ${rejectionCode}`);
+      }
+      const committedRoom = result.snapshot.val();
+      if (!committedRoom?.game) throw new RoomCommitError('missing-committed-state');
+      return {
+        state: decodeState(committedRoom.game),
+        move: committedRoom.lastMove,
+        idempotent,
+      };
+    } catch (error) {
+      throw commitError(error, 'Bluff commit');
+    }
+  }
+
   return Object.freeze({
     get path() { return roomPath(); },
     get roomCode() { return selectedRoomCode; },
@@ -1520,5 +1669,6 @@ export function createFirebaseRoomStore({
     commitDraw,
     commitDiscard,
     commitPokerAction,
+    commitBluffAction,
   });
 }

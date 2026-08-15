@@ -391,6 +391,75 @@
       <ul id="pk-results-list" class="results-bounty-list" aria-label="All player hands and results"></ul>
       <div class="results-actions"><button id="pk-btn-play-again" class="btn primary" type="button">Play Again</button><button id="pk-btn-home" class="btn secondary" type="button">Home</button></div>
     </section>
+
+    <section id="bl-online-choice" class="screen" hidden aria-label="Bluff options">
+      <h2 class="setup-heading">Bluff</h2>
+      <button id="bl-btn-create-room" class="btn primary" type="button">🏠 Create Room</button>
+      <button id="bl-btn-join-room" class="btn secondary" type="button">🚪 Join Room</button>
+      <button id="bl-btn-back-online" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="bl-create-room" class="screen" hidden aria-label="Create a Bluff room">
+      <h2 class="setup-heading">Create Room</h2>
+      <div class="setup-group"><input id="bl-create-name" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input"></div>
+      <div class="setup-group">
+        <label class="setup-label">Choose Avatar</label>
+        <div class="emoji-picker" role="group" aria-label="Select avatar">
+          <button class="emoji-btn selected" type="button" data-emoji="👲">👲</button><button class="emoji-btn" type="button" data-emoji="🧑‍💼">🧑‍💼</button><button class="emoji-btn" type="button" data-emoji="👩‍💼">👩‍💼</button><button class="emoji-btn" type="button" data-emoji="🥷">🥷</button><button class="emoji-btn" type="button" data-emoji="🧙">🧙</button><button class="emoji-btn" type="button" data-emoji="🧝‍♀️">🧝‍♀️</button>
+        </div>
+      </div>
+      <button id="bl-btn-create-submit" class="btn primary" type="button">Create</button>
+      <button id="bl-btn-back-create" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="bl-join-room" class="screen" hidden aria-label="Join a Bluff room">
+      <h2 class="setup-heading">Join Room</h2>
+      <div class="setup-group"><input id="bl-room-code" type="text" maxlength="4" pattern="[A-HJ-NP-Z]{4}" placeholder="Room Code" autocomplete="off" class="text-input" style="text-transform:uppercase"></div>
+      <div class="setup-group"><input id="bl-join-name" type="text" maxlength="12" placeholder="Your Name" autocomplete="off" class="text-input"></div>
+      <div class="setup-group">
+        <label class="setup-label">Choose Avatar</label>
+        <div class="emoji-picker" role="group" aria-label="Select avatar">
+          <button class="emoji-btn selected" type="button" data-emoji="👲">👲</button><button class="emoji-btn" type="button" data-emoji="🧑‍💼">🧑‍💼</button><button class="emoji-btn" type="button" data-emoji="👩‍💼">👩‍💼</button><button class="emoji-btn" type="button" data-emoji="🥷">🥷</button><button class="emoji-btn" type="button" data-emoji="🧙">🧙</button><button class="emoji-btn" type="button" data-emoji="🧝‍♀️">🧝‍♀️</button>
+        </div>
+      </div>
+      <button id="bl-btn-join-submit" class="btn primary" type="button">Join</button>
+      <button id="bl-btn-back-join" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="bl-lobby" class="screen" hidden aria-label="Bluff lobby">
+      <header class="lobby-header"><h2 class="lobby-title">Game Lobby</h2><p class="room-code-display">Room: <span id="bl-lobby-room-code">----</span></p></header>
+      <ul id="bl-lobby-player-list" class="player-list" aria-label="Players"></ul>
+      <div class="lobby-actions">
+        <button id="bl-btn-share-code" class="btn secondary" type="button">📋 Share Code</button>
+        <button id="bl-btn-qr-code" class="btn secondary" type="button">📱 QR Code</button>
+        <button id="bl-btn-start-online" class="btn primary" type="button" hidden>Start Game</button>
+        <button id="bl-btn-leave-lobby" class="btn secondary back-btn" type="button">← Leave</button>
+        <p id="bl-lobby-waiting" class="lobby-waiting">Waiting for host to start…</p>
+      </div>
+    </section>
+
+    <section id="bl-gameplay" class="screen" hidden aria-label="Bluff game board">
+      <div id="bl-all-players" class="game-all-players" aria-label="Other players"></div>
+      <div id="bl-pile-area" class="bl-pile-area" aria-label="Center pile"></div>
+      <div id="bl-event-bar" class="event-bar" aria-live="polite"></div>
+      <div id="bl-challenge-area" class="bl-challenge-area" hidden aria-label="Challenge options"></div>
+      <div id="bl-actions-area" class="bl-actions-area" aria-label="Game actions"></div>
+      <div id="bl-hand-area" class="sr-hand-area bl-hand-area" aria-label="Your hand"></div>
+      <div id="bl-self-bar" class="game-self-bar" aria-label="Your info">
+        <div class="game-self-info"><span id="bl-self-emoji" class="game-self-emoji"></span><span id="bl-self-name" class="game-self-name"></span></div>
+        <div class="game-self-controls"><label class="mute-toggle" for="bl-mute-toggle"><input id="bl-mute-toggle" type="checkbox"> 🔇 Mute</label></div>
+      </div>
+    </section>
+
+    <section id="bl-results" class="screen" hidden aria-label="Bluff results">
+      <header class="results-header"><h2 class="results-title">🏆 Game Over!</h2></header>
+      <div id="bl-winner-display" class="winner-display" aria-label="Winner"></div>
+      <ul id="bl-results-list" class="results-bounty-list" aria-label="Results"></ul>
+      <div class="results-actions"><button id="bl-btn-play-again" class="btn primary" type="button">Play Again</button><button id="bl-btn-home" class="btn secondary" type="button">Home</button></div>
+    </section>
+
+    <div id="bl-rank-selector" class="bl-rank-overlay" hidden aria-label="Rank selector"></div>
+    <div id="bl-challenge-result" class="bl-challenge-result-overlay" hidden aria-label="Challenge result"></div>
   </div>
 
   <aside id="update-toast" class="update-toast" hidden role="status" aria-live="polite" aria-busy="false">
