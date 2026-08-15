@@ -528,17 +528,21 @@ export function createSimpleRummyRuntime({
 
   async function authoritativeFinally() {
     if (!store || disposed) return;
+    let shouldRender = false;
     try {
+      const previousRevision = state?.revision;
       const room = await store.readRoom();
       if (room?.meta?.status === 'active' && room.game
         && (!state || room.game.revision >= state.revision)) {
         state = room.game;
         updateIdentity(room);
+        shouldRender = !Number.isSafeInteger(previousRevision)
+          || room.game.revision > previousRevision;
       }
     } catch (error) {
       reportError(error);
     } finally {
-      if (state) {
+      if (state && shouldRender) {
         try { await renderState({ state }); } catch (error) { reportError(error); }
       }
     }
