@@ -45,7 +45,7 @@ export function createFlipAndMatchRuntime({
   uid,
   rules,
   effects,
-  storage = globalThis.sessionStorage,
+  storage = globalThis.localStorage,
   roomStoreFactory = createFirebaseRoomStore,
   codeGenerator = generateRoomCode,
   callbacks = {},
@@ -302,7 +302,7 @@ export function createFlipAndMatchRuntime({
       await attach(activeStore, saved.playerIndex, room);
       return true;
     } catch (error) {
-      sessions.clear();
+      if (error?.code === 'room-not-found') sessions.clear();
       reportError(error);
       return false;
     }

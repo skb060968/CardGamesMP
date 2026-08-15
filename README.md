@@ -74,5 +74,5 @@ The migrated UI intentionally separates authoritative card order from UI-only ha
 - Use `CardGamesMP` as the Vercel project root; `vercel.json` builds with `npm run build` and publishes `dist`.
 - Configure the `VITE_FIREBASE_*` values in Vercel project settings. Local `.env` files are excluded from Git and Vercel uploads.
 - Enable Firebase Authentication → Sign-in method → Anonymous for the dedicated Firebase project.
-- Explicitly deploy this repository's `firebase-rules.json` to the dedicated Realtime Database. The rules contain only the CardGamesMP `card-games-mp` namespace and are not shared with other game projects.
+- Explicitly deploy this repository's `firebase-rules.json` to the dedicated Realtime Database. The rules contain only the CardGamesMP `card-games-mp` namespace and are not shared with other game projects. From this `CardGamesMP` directory, verify the selected dedicated Firebase project and run `firebase deploy --only database --project <project-id>`; `firebase.json` maps that command to the correct rules file. Vercel deployment does not publish database rules.
 - Live multiplayer verification should use two browser profiles/devices and cover create, join, start, move synchronization, refresh/reconnect, Play Again, leave, and host room deletion for all six playable games.

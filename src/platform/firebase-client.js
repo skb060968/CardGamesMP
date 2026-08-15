@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import {
-  browserSessionPersistence,
+  browserLocalPersistence,
   getAuth,
   setPersistence,
   signInAnonymously,
@@ -44,7 +44,10 @@ export async function createFirebaseClient({
   const app = existing ? getApp(appName) : initializeApp(config, appName);
   const auth = getAuth(app);
   const database = getDatabase(app);
-  await withAbort(setPersistence(auth, browserSessionPersistence), signal);
+  await withAbort(setPersistence(auth, browserLocalPersistence), signal);
+  if (typeof auth.authStateReady === 'function') {
+    await withAbort(auth.authStateReady(), signal);
+  }
   const user = auth.currentUser || (await withAbort(signInAnonymously(auth), signal)).user;
   if (!user?.uid) throw new Error('Firebase authentication did not return a UID');
   return Object.freeze({ app, auth, database, user, uid: user.uid });

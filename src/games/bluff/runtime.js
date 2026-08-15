@@ -80,7 +80,7 @@ export function createBluffRuntime({
   uid,
   rules,
   effects,
-  storage = globalThis.sessionStorage,
+  storage = globalThis.localStorage,
   roomStoreFactory = createFirebaseRoomStore,
   codeGenerator = generateRoomCode,
   callbacks = {},
@@ -198,7 +198,10 @@ export function createBluffRuntime({
       playerIndex: gamePlayerIndex,
       handOrder: reconcileHandOrder(renderable),
       onAction: actLocal,
-      onSort: sortVisualCards,
+      onSort: (mode) => {
+        sortVisualCards(mode);
+        return renderState();
+      },
       onReorder: reorderVisualCard,
     });
   };
@@ -488,7 +491,7 @@ export function createBluffRuntime({
       return true;
     } catch (error) {
       roomSlotIndex = -1;
-      sessions.clear();
+      if (error?.code === 'room-not-found') sessions.clear();
       reportError(error);
       return false;
     }

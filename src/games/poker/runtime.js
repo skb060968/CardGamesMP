@@ -60,7 +60,7 @@ export function createPokerRuntime({
   uid,
   rules,
   effects,
-  storage = globalThis.sessionStorage,
+  storage = globalThis.localStorage,
   roomStoreFactory = createFirebaseRoomStore,
   codeGenerator = generateRoomCode,
   callbacks = {},
@@ -326,7 +326,7 @@ export function createPokerRuntime({
       return true;
     } catch (error) {
       roomSlotIndex = -1;
-      sessions.clear();
+      if (error?.code === 'room-not-found') sessions.clear();
       reportError(error);
       return false;
     }
