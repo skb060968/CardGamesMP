@@ -2999,6 +2999,12 @@ body {
   min-height: 22px; font-size: 0.75rem; font-weight: 700;
 }
 .pt-draw-result .card { width: 30px; height: 42px; }
+
+/* Keep the center suit proportional on local face-up draw-result mini cards. */
+:is(.sr-draw-result-card, .pt-draw-result-card) .suit-center {
+  font-size: 0.7rem;
+}
+
 #pt-results-list .pt-result-status { font-weight: 700; }
 
 /* Poker integration refinements: responsive actions/results and abort-safe transient coins. */

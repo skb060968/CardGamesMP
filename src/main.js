@@ -47,7 +47,7 @@ import {
 } from './games/bluff/ui.js';
 import { renderCardBack, renderCardFace } from './shared/card-renderer.js';
 import {
-  announceCapture, announceWin, initAudio, isMuted,
+  announceBluffPlacement, announceCapture, announceWin, initAudio, isMuted,
   playSound, toggleMute, warmSpeech,
 } from './shared/voice-announcer.js';
 import { createShareHandler, showQRCode } from './deep-link-handler.js';
@@ -72,7 +72,29 @@ const selectedEmoji = (screenId) =>
 let runtime = null;
 let activeGameId = null;
 let firebaseClientPromise = null;
+
+function errorChain(error) {
+  const chain = [];
+  const seen = new Set();
+  let current = error;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    chain.push(current);
+    current = current.cause;
+  }
+  return chain;
+}
+
 function errorMessage(error) {
+  const chain = errorChain(error);
+  const details = chain
+    .flatMap((entry) => [entry?.code, entry?.message])
+    .filter((value) => typeof value === 'string')
+    .join(' ')
+    .toLowerCase();
+
+  if (/permission(?:_|-|\s)denied/.test(details)) return 'Permission denied.';
+
   const messages = {
     'room-not-found': 'Room not found.',
     'room-full': 'Room is full.',
@@ -86,7 +108,25 @@ function errorMessage(error) {
     'revision-conflict': 'Game advanced on another device. State refreshed.',
     'wrong-turn': 'It is not your turn.',
   };
-  return messages[error?.code] || error?.message || 'Something went wrong.';
+  if (messages[error?.code]) return messages[error.code];
+
+  const retryableCodes = new Set([
+    'firebase-operation-failed',
+    'room-sync-timeout',
+    'network-error',
+    'network-request-failed',
+    'auth/network-request-failed',
+    'unavailable',
+    'disconnected',
+    'timeout',
+  ]);
+  const hasRetryableCode = chain.some((entry) => retryableCodes.has(
+    typeof entry?.code === 'string' ? entry.code.toLowerCase() : '',
+  ));
+  const hasNetworkFailure = /network|offline|failed to fetch|connection (?:lost|closed|reset)|timed? ?out|unavailable|disconnected/.test(details);
+  if (hasRetryableCode || hasNetworkFailure) return 'Action failed — try again.';
+
+  return error?.message || 'Something went wrong.';
 }
 
 function roomEntries(room) {
@@ -363,6 +403,7 @@ async function buildRuntime(gameId) {
       clearSelection: clearBLSelection,
       setEventMessage: setBLEventMessage,
       playSound,
+      announcePlacement: announceBluffPlacement,
       onFinished: ({ state }) => showBLFinished(state, candidate),
     });
     candidate = createBluffRuntime({
@@ -712,6 +753,7 @@ async function restoreSession() {
     if (await candidate.restoreSession()) {
       runtime = candidate;
       activeGameId = gameId;
+      syncEndGameControlVisibility();
       return true;
     }
     await candidate.close();
@@ -778,9 +820,111 @@ async function setupServiceWorkerUpdates() {
     },
   });
 }
+let syncEndGameControlVisibility = () => {};
+
+const MUTE_TOGGLE_SELECTOR = '.mute-toggle input[type="checkbox"]';
+
+function syncMuteToggles(muted = isMuted()) {
+  document.querySelectorAll(MUTE_TOGGLE_SELECTOR).forEach((toggle) => {
+    toggle.checked = muted;
+  });
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('cardgames:mutechange', (event) => {
+    syncMuteToggles(event.detail?.muted === true);
+  });
+  window.addEventListener('storage', (event) => {
+    if (event.key === 'card_games_muted') syncMuteToggles();
+  });
+  requestAnimationFrame(() => syncMuteToggles());
+}
+
+const END_GAME_CONTROLS = Object.freeze([
+  { gameId: 'patte-par-patta', buttonId: 'btn-end-game', screenId: 'ppp-gameplay', container: '.game-controls' },
+  { gameId: 'flip-and-match', buttonId: 'fm-btn-end-game', screenId: 'fm-gameplay', container: '.game-controls' },
+  { gameId: 'simple-rummy', buttonId: 'sr-btn-end-game', screenId: 'sr-gameplay', container: '.game-controls' },
+  { gameId: 'perfect-ten', buttonId: 'pt-btn-end-game', screenId: 'pt-gameplay', container: '.game-controls' },
+  { gameId: 'poker', buttonId: 'pk-btn-end-game', screenId: 'pk-gameplay', container: '.game-self-controls' },
+  { gameId: 'bluff', buttonId: 'bl-btn-end-game', screenId: 'bl-gameplay', container: '.game-self-controls' },
+]);
+
+function isActiveGameState(gameId, state) {
+  return gameId === 'poker' ? state?.status === 'betting' : state?.status === 'playing';
+}
+
+function setupEndGameControls() {
+  const controls = END_GAME_CONTROLS.map((definition) => {
+    const screen = element(definition.screenId);
+    let button = element(definition.buttonId);
+    if (!button && screen) {
+      const container = screen.querySelector(definition.container);
+      if (container) {
+        button = document.createElement('button');
+        button.id = definition.buttonId;
+        button.className = 'btn-end-game';
+        button.type = 'button';
+        button.hidden = true;
+        button.textContent = '✕';
+        container.appendChild(button);
+      }
+    }
+    if (!screen || !button) return null;
+    button.classList.add('btn-end-game');
+    button.type = 'button';
+    button.title = 'End game';
+    button.setAttribute('aria-label', 'End game');
+    return { definition, screen, button };
+  }).filter(Boolean);
+
+  const syncVisibility = () => {
+    controls.forEach(({ definition, screen, button }) => {
+      const current = activeGameId === definition.gameId ? runtime : null;
+      button.hidden = screen.hidden
+        || !current?.connected
+        || !current.isHost
+        || !isActiveGameState(definition.gameId, current.currentState);
+    });
+  };
+  syncEndGameControlVisibility = syncVisibility;
+
+  controls.forEach(({ definition, screen, button }) => {
+    button.addEventListener('click', async () => {
+      if (button.disabled) return;
+      const current = runtime;
+      if (activeGameId !== definition.gameId
+        || !current?.connected
+        || !current.isHost
+        || !isActiveGameState(definition.gameId, current.currentState)) {
+        syncVisibility();
+        return;
+      }
+      if (!window.confirm('End this game for everyone?')) return;
+
+      button.disabled = true;
+      try {
+        await current.leaveRoom({ deleteIfHost: true });
+        showToast('Game ended.', 2000);
+      } catch (error) {
+        console.error(`[CardGamesMP:${definition.gameId}] End game failed`, error);
+        showToast(errorMessage(error), 3000);
+      } finally {
+        button.disabled = false;
+        requestAnimationFrame(syncVisibility);
+      }
+    });
+
+    const observer = new MutationObserver(() => requestAnimationFrame(syncVisibility));
+    observer.observe(screen, { attributes: true, attributeFilter: ['hidden'] });
+  });
+
+  requestAnimationFrame(syncVisibility);
+}
+
 async function bootstrap() {
   initAudio();
   wireEmojiPickers();
+  setupEndGameControls();
   wirePPP();
   wireFlipAndMatch();
   wireSimpleRummy();

@@ -10,7 +10,6 @@ export {
   createGame,
   placeCards,
   passCard,
-  acceptPlacement,
   deriveChallengeOutcome,
   resolveChallenge,
   validateState,

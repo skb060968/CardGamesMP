@@ -284,21 +284,6 @@ export function passCard(state, playerIndex) {
   return result;
 }
 
-export function acceptPlacement(state, playerIndex, placementMoveId, placementRevision) {
-  assertActiveTurn(state, playerIndex);
-  const placement = requirePlacementPin(state, placementMoveId, placementRevision);
-  if (placement.playerIndex === playerIndex) throw new Error('Placer cannot accept their own placement');
-  const winner = finishProvisionalWinner(state);
-  if (winner) return winner;
-  const result = {
-    ...cloneState(state),
-    lastPlacement: null,
-    revision: state.revision + 1,
-  };
-  assertValid(result);
-  return result;
-}
-
 export function deriveChallengeOutcome(state, challengerIndex) {
   assertValid(state);
   assertPlayerIndex(state, challengerIndex, 'challengerIndex');

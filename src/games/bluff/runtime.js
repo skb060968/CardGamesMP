@@ -86,7 +86,7 @@ export function createBluffRuntime({
   callbacks = {},
 }) {
   for (const name of [
-    'createGame', 'placeCards', 'passCard', 'acceptPlacement',
+    'createGame', 'placeCards', 'passCard',
     'resolveChallenge', 'validateState', 'serializeState',
   ]) requireFunction(rules?.[name], `rules.${name}`);
   requireFunction(effects?.animateAction, 'effects.animateAction');
@@ -290,7 +290,7 @@ export function createBluffRuntime({
     if (!Number.isInteger(playerIndex) || playerIndex < 0 || playerIndex >= MAX_PLAYERS) {
       throw new TypeError('Invalid playerIndex');
     }
-    if (!['place', 'pass', 'challenge', 'accept'].includes(actionType)) {
+    if (!['place', 'pass', 'challenge'].includes(actionType)) {
       throw new TypeError('Unsupported Bluff action');
     }
     const encodedNextState = encodeGameState(proposedState);

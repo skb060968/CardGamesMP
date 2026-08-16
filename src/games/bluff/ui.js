@@ -238,15 +238,6 @@ function renderActions(state, localPlayerIndex, callbacks) {
     if (state.currentRank) {
       actionButton(row, '⏭ Pass', 'bl-pass-btn', { type: 'pass', payload: null }, callbacks.onAction);
     }
-    if (placement) {
-      actionButton(
-        row,
-        placement.placerEmpty ? 'Accept Winner' : 'Accept',
-        'secondary bl-accept-btn',
-        { type: 'accept', payload: placementPin(placement) },
-        callbacks.onAction,
-      );
-    }
   }
   if (canChallenge) {
     actionButton(
@@ -259,21 +250,9 @@ function renderActions(state, localPlayerIndex, callbacks) {
   }
   container.appendChild(row);
 }
-function renderChallengePrompt(state, localPlayerIndex) {
+function renderChallengePrompt() {
   const area = clear(document.getElementById('bl-challenge-area'));
-  if (!area) return;
-  const placement = state.lastPlacement;
-  const visible = state.status === 'playing' && placement && placement.playerIndex !== localPlayerIndex;
-  area.hidden = !visible;
-  if (!visible) return;
-  const placer = state.players[placement.playerIndex];
-  appendText(
-    area,
-    'bl-challenge-announcement bl-challenge-announcement-prominent',
-    `${placer?.emoji || ''} ${placer?.name || 'Player'} placed ${placement.count} × ${placement.declaredRank}`.trim(),
-    'p',
-  );
-  appendText(area, 'bl-wait-text', 'Challenge now, or let the current player act.', 'p');
+  if (area) area.hidden = true;
 }
 function wireSort(callbacks, state) {
   let host = document.getElementById('bl-sort-host');

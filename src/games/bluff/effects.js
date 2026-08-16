@@ -72,6 +72,7 @@ export function createBluffEffects({
   clearSelection = () => {},
   setEventMessage = () => {},
   playSound = () => {},
+  announcePlacement = () => {},
   onFinished = async () => {},
 } = {}) {
   requireFunction(renderGameplay, 'renderGameplay');
@@ -81,6 +82,7 @@ export function createBluffEffects({
   requireFunction(clearSelection, 'clearSelection');
   requireFunction(setEventMessage, 'setEventMessage');
   requireFunction(playSound, 'playSound');
+  requireFunction(announcePlacement, 'announcePlacement');
   requireFunction(onFinished, 'onFinished');
   let finishedRevision = null;
 
@@ -101,7 +103,9 @@ export function createBluffEffects({
           (fromState?.players?.[playerIndex]?.hand?.length || 0)
             - (toState?.players?.[playerIndex]?.hand?.length || 0),
         );
-        const count = Math.min(4, ids.length || inferredCount);
+        const placement = toState?.lastPlacement;
+        const count = Math.min(4, placement?.count || ids.length || inferredCount);
+        void announcePlacement(count, placement?.declaredRank || payload?.declaredRank);
         if (!prefersReducedMotion()) {
           const sourceBlock = playerTarget(documentRef, playerIndex, localPlayerIndex);
           const animations = Array.from({ length: count }, (_, index) => {
@@ -156,13 +160,11 @@ export function createBluffEffects({
           : `✅ ${placer?.name || 'Player'} was truthful; ${challenger?.name || 'Player'} takes the pile.`);
         return;
       }
-      if (implicitAcceptance || (action === 'accept' && toState?.status === 'finished')) {
+      if (implicitAcceptance) {
         setEventMessage(`${toState.players[toState.winnerIndex]?.name || 'Player'} wins!`);
       } else if (action === 'pass') {
         playSound('capture');
         setEventMessage(playerIndex === localPlayerIndex ? 'You passed' : `${fromState.players[playerIndex]?.name || 'Player'} passed`);
-      } else if (action === 'accept') {
-        setEventMessage('Placement accepted');
       }
     },
 

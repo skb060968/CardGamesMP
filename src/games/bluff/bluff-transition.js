@@ -5,7 +5,7 @@ const ACTION_KEYS = new Set([
 ]);
 const PLACE_KEYS = new Set(['cardIds', 'declaredRank']);
 const PIN_KEYS = new Set(['placementMoveId', 'placementRevision']);
-const ACTIONS = new Set(['place', 'pass', 'challenge', 'accept']);
+const ACTIONS = new Set(['place', 'pass', 'challenge']);
 
 function requireFunction(value, name) {
   if (typeof value !== 'function') throw new TypeError(`${name} must be a function`);
@@ -49,18 +49,13 @@ function replay(rules, currentState, action) {
     );
   }
   if (action.action === 'pass') return rules.passCard(currentState, playerIndex);
-  if (action.action === 'challenge') {
-    return rules.resolveChallenge(
-      currentState, playerIndex, payload.placementMoveId, payload.placementRevision,
-    );
-  }
-  return rules.acceptPlacement(
+  return rules.resolveChallenge(
     currentState, playerIndex, payload.placementMoveId, payload.placementRevision,
   );
 }
 
 export function createBluffTransitionValidator(rules) {
-  for (const name of ['placeCards', 'passCard', 'acceptPlacement', 'resolveChallenge', 'validateState']) {
+  for (const name of ['placeCards', 'passCard', 'resolveChallenge', 'validateState']) {
     requireFunction(rules?.[name], `rules.${name}`);
   }
   return ({ currentState, nextState, action } = {}) => {

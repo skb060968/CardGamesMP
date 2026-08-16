@@ -1515,7 +1515,7 @@ export function createFirebaseRoomStore({
       if (!Number.isInteger(playerIndex) || playerIndex < 0 || playerIndex >= maxPlayers) {
         throw new TypeError(`playerIndex must be an integer from 0 through ${maxPlayers - 1}`);
       }
-      if (!['place', 'pass', 'challenge', 'accept'].includes(actionType)) {
+      if (!['place', 'pass', 'challenge'].includes(actionType)) {
         throw new TypeError('Unsupported Bluff action');
       }
 
@@ -1533,7 +1533,7 @@ export function createFirebaseRoomStore({
           || typeof actionPayload.declaredRank !== 'string') {
           throw new TypeError('Invalid Bluff place payload');
         }
-      } else if (actionType === 'challenge' || actionType === 'accept') {
+      } else if (actionType === 'challenge') {
         if (!isExactPayload(actionPayload, ['placementMoveId', 'placementRevision'])
           || typeof actionPayload.placementMoveId !== 'string'
           || !actionPayload.placementMoveId.trim()

@@ -8,6 +8,10 @@
 
 const MUTE_KEY = 'card_games_muted';
 
+// Keeps mute functional for the current session if localStorage is unavailable.
+let _mutedFallback = false;
+let _useMuteFallback = false;
+
 // Global flag to disable all speech (used during screen transitions)
 let _speechDisabled = false;
 // Global flag to disable all sound effects (used during screen transitions)
@@ -59,7 +63,7 @@ export function playSound(name) {
  * @param {string} text - The text to speak
  * @returns {Promise<void>}
  */
-function speak(text) {
+function speak(text, lang) {
   if (_speechDisabled) return Promise.resolve(); // Don't speak if disabled
   if (isMuted()) return Promise.resolve();
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
@@ -68,11 +72,16 @@ function speak(text) {
 
   return new Promise((resolve) => {
     setTimeout(() => {
+      if (_speechDisabled || isMuted()) {
+        resolve();
+        return;
+      }
       try {
         // Resume speech synthesis (helps Safari/iOS)
         if (speechSynthesis.paused) speechSynthesis.resume();
         speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
+        if (lang) utterance.lang = lang;
         utterance.rate = 0.95;
         utterance.pitch = 1.0;
         utterance.volume = 1.0;
@@ -85,6 +94,20 @@ function speak(text) {
       }
     }, 150);
   });
+}
+
+const BLUFF_SPOKEN_RANK = Object.freeze({
+  A: 'इक्के', '2': 'दुक्की', '3': 'तिक्की', '4': 'चौकी', '5': 'पंजी',
+  '6': 'छक्की', '7': 'सत्ती', '8': 'अट्ठी', '9': 'नहली', '10': 'दहली',
+  J: 'गुलाम', Q: 'रानी', K: 'राजा',
+});
+const BLUFF_SPOKEN_COUNT = Object.freeze({ 1: 'एक', 2: 'दो', 3: 'तीन', 4: 'चार' });
+
+export function announceBluffPlacement(count, rank) {
+  const spokenCount = BLUFF_SPOKEN_COUNT[count];
+  const spokenRank = count === 1 && rank === 'A' ? 'इक्का' : BLUFF_SPOKEN_RANK[rank];
+  if (!spokenCount || !spokenRank) return Promise.resolve();
+  return speak(`${spokenCount} ${spokenRank}`, 'hi-IN');
 }
 
 /**
@@ -155,10 +178,19 @@ export function announceWin(playerName) {
  */
 export function toggleMute() {
   const newMuted = !isMuted();
+  _mutedFallback = newMuted;
   try {
     localStorage.setItem(MUTE_KEY, JSON.stringify(newMuted));
+    _useMuteFallback = false;
   } catch (_) {
-    // localStorage full or unavailable — continue without persistence
+    // Preserve the selected state for this page session when storage is unavailable.
+    _useMuteFallback = true;
+  }
+  if (newMuted) cancelAllSpeech();
+  if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('cardgames:mutechange', {
+      detail: { muted: newMuted },
+    }));
   }
   return newMuted;
 }
@@ -171,12 +203,16 @@ export function isMuted() {
   try {
     const stored = localStorage.getItem(MUTE_KEY);
     if (stored !== null) {
-      return JSON.parse(stored) === true;
+      _mutedFallback = JSON.parse(stored) === true;
+      _useMuteFallback = false;
+      return _mutedFallback;
     }
+    if (!_useMuteFallback) _mutedFallback = false;
   } catch (_) {
-    // Corrupted or unavailable localStorage — default to unmuted
+    // Keep the in-memory state when storage is corrupted or unavailable.
+    _useMuteFallback = true;
   }
-  return false;
+  return _mutedFallback;
 }
 
 /**

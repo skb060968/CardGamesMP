@@ -1,6 +1,6 @@
 import { executeCommittedAction } from '../../core/committed-action.js';
 
-const ACTIONS = new Set(['place', 'pass', 'challenge', 'accept']);
+const ACTIONS = new Set(['place', 'pass', 'challenge']);
 const PLACE_KEYS = new Set(['cardIds', 'declaredRank']);
 const PIN_KEYS = new Set(['placementMoveId', 'placementRevision']);
 
@@ -28,10 +28,10 @@ function normalizeAction(action) {
       || typeof payload.declaredRank !== 'string') throw new TypeError('Invalid place payload');
     return { type: action.type, payload: { cardIds: [...payload.cardIds], declaredRank: payload.declaredRank } };
   }
-  if (action.type === 'challenge' || action.type === 'accept') {
+  if (action.type === 'challenge') {
     if (!exactKeys(payload, PIN_KEYS) || typeof payload.placementMoveId !== 'string'
       || !payload.placementMoveId.trim() || !Number.isSafeInteger(payload.placementRevision)
-      || payload.placementRevision < 1) throw new TypeError(`Invalid ${action.type} payload`);
+      || payload.placementRevision < 1) throw new TypeError('Invalid challenge payload');
     return { type: action.type, payload: { ...payload } };
   }
   if (payload !== null) throw new TypeError('Pass payload must be null');
@@ -44,12 +44,7 @@ function reduce(rules, state, playerIndex, action, moveId) {
     );
   }
   if (action.type === 'pass') return rules.passCard(state, playerIndex);
-  if (action.type === 'challenge') {
-    return rules.resolveChallenge(
-      state, playerIndex, action.payload.placementMoveId, action.payload.placementRevision,
-    );
-  }
-  return rules.acceptPlacement(
+  return rules.resolveChallenge(
     state, playerIndex, action.payload.placementMoveId, action.payload.placementRevision,
   );
 }
@@ -58,7 +53,7 @@ export function createBluffAction({
   coordinator, rules, sync, effects, getState, setState, createMoveId = defaultMoveId,
 }) {
   requireFunction(coordinator?.runLocal, 'coordinator.runLocal');
-  for (const name of ['placeCards', 'passCard', 'acceptPlacement', 'resolveChallenge', 'validateState']) {
+  for (const name of ['placeCards', 'passCard', 'resolveChallenge', 'validateState']) {
     requireFunction(rules?.[name], `rules.${name}`);
   }
   requireFunction(sync?.commitBluffAction, 'sync.commitBluffAction');
