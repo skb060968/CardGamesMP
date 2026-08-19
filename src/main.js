@@ -61,6 +61,7 @@ import { createPokerEffects, createPokerRuntime } from './games/poker/index.js';
 import { createBluffEffects, createBluffRuntime } from './games/bluff/index.js';
 import { createFirebaseClient } from './platform/firebase-client.js';
 import { createServiceWorkerUpdateClient } from './platform/service-worker-update.js';
+import { clearDiagnostics, formatDiagnostics, recordDiagnostic } from './platform/diagnostics.js';
 import { GAMES } from './games/registry.js';
 
 const AVAILABLE_IDS = new Set(['patte-par-patta', 'flip-and-match', 'simple-rummy', 'perfect-ten', 'poker', 'bluff']);
@@ -85,7 +86,7 @@ function errorChain(error) {
   return chain;
 }
 
-function errorMessage(error) {
+function classifyErrorMessage(error) {
   const chain = errorChain(error);
   const details = chain
     .flatMap((entry) => [entry?.code, entry?.message])

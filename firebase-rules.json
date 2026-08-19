@@ -85,7 +85,7 @@
             "presence": {
               "$uidKey": {
                 "$connectionId": {
-                  ".validate": "!newData.exists() ? (data.child('uid').val() === auth.uid || data.parent().parent().parent().child('meta/hostUid').val() === auth.uid) : (newData.val() === data.val() || (newData.child('uid').val() === auth.uid && newData.child('playerIndex').isNumber() && newData.child('slotId').isString() && newData.parent().parent().parent().child('players').child(newData.child('slotId').val()).child('uid').val() === auth.uid))"
+                  ".validate": "!newData.exists() ? (data.child('uid').val() === auth.uid || data.parent().parent().parent().child('meta/hostUid').val() === auth.uid) : (newData.val() === data.val() || (newData.hasChildren(['uid','playerIndex','slotId','connectedAt']) && newData.child('uid').isString() && newData.child('playerIndex').isNumber() && newData.child('playerIndex').val() >= 0 && newData.child('playerIndex').val() <= 5 && newData.child('slotId').isString() && newData.child('connectedAt').isNumber()))"
                 }
               }
             },
