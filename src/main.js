@@ -130,6 +130,145 @@ function classifyErrorMessage(error) {
   return error?.message || 'Something went wrong.';
 }
 
+/**
+ * Records a precise diagnostic for a failure and returns the friendly,
+ * player-facing message (unchanged). This is the single choke point used by
+ * every error toast, so every field failure is captured on-device with its
+ * real cause codes even though the player only sees the friendly text.
+ * @param {Error} error
+ * @param {string} [context] short label describing what was attempted
+ * @returns {string}
+ */
+function errorMessage(error, context = 'action') {
+  const friendly = classifyErrorMessage(error);
+  try {
+    const chain = errorChain(error);
+    const codes = chain
+      .map((entry) => (typeof entry?.code === 'string' ? entry.code : null))
+      .filter(Boolean);
+    const blob = chain
+      .flatMap((entry) => [entry?.code, entry?.message])
+      .filter((value) => typeof value === 'string')
+      .join(' ');
+    if (/permission(?:_|-|\s)denied/i.test(blob) && !codes.includes('permission_denied')) {
+      codes.push('permission_denied');
+    }
+    const deepest = chain[chain.length - 1];
+    recordDiagnostic({
+      game: activeGameId,
+      label: context,
+      codes,
+      detail: deepest?.message || error?.message || friendly,
+    });
+  } catch (_) {
+    // Diagnostics must never interfere with the player-facing flow.
+  }
+  return friendly;
+}
+
+/**
+ * Builds a lightweight on-device diagnostics viewer so an operator can read or
+ * copy the recorded failure log directly on any phone (no console needed).
+ * Opened by a discreet 5-tap gesture on the landing page.
+ */
+function showDiagnosticsOverlay() {
+  if (document.getElementById('diagnostics-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'diagnostics-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-label', 'Diagnostics log');
+  Object.assign(overlay.style, {
+    position: 'fixed', inset: '0', zIndex: '10000', display: 'flex',
+    flexDirection: 'column', gap: '10px', padding: '16px',
+    background: 'rgba(8, 13, 20, 0.92)', color: '#f8fafc',
+    font: '13px/1.4 ui-monospace, Menlo, Consolas, monospace',
+  });
+
+  const title = document.createElement('strong');
+  title.textContent = 'Diagnostics (recent failures)';
+  title.style.fontSize = '15px';
+
+  const area = document.createElement('textarea');
+  area.readOnly = true;
+  area.value = formatDiagnostics();
+  Object.assign(area.style, {
+    flex: '1', width: '100%', resize: 'none', borderRadius: '10px',
+    border: '1px solid #334155', padding: '10px', background: '#0f172a',
+    color: '#e2e8f0', font: 'inherit', whiteSpace: 'pre', overflow: 'auto',
+  });
+
+  const row = document.createElement('div');
+  Object.assign(row.style, { display: 'flex', gap: '8px', flexWrap: 'wrap' });
+  const makeButton = (label) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    Object.assign(button.style, {
+      flex: '1', minWidth: '90px', padding: '11px 14px', borderRadius: '10px',
+      border: '0', fontWeight: '700', cursor: 'pointer',
+    });
+    return button;
+  };
+  const copyButton = makeButton('Copy');
+  copyButton.style.background = '#38bdf8';
+  copyButton.style.color = '#082f49';
+  const clearButton = makeButton('Clear');
+  clearButton.style.background = '#f59e0b';
+  clearButton.style.color = '#451a03';
+  const closeButton = makeButton('Close');
+  closeButton.style.background = '#334155';
+  closeButton.style.color = '#f8fafc';
+
+  copyButton.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(area.value);
+      copyButton.textContent = 'Copied';
+    } catch (_) {
+      area.focus();
+      area.select();
+      copyButton.textContent = 'Select + copy';
+    }
+    setTimeout(() => { copyButton.textContent = 'Copy'; }, 1500);
+  });
+  clearButton.addEventListener('click', () => {
+    clearDiagnostics();
+    area.value = formatDiagnostics();
+  });
+  closeButton.addEventListener('click', () => overlay.remove());
+
+  row.append(copyButton, clearButton, closeButton);
+  overlay.append(title, area, row);
+  document.body.appendChild(overlay);
+}
+
+/**
+ * Wires the discreet 5-tap gesture (within 2s) that opens the diagnostics
+ * viewer. Attached at the document level so it is reachable on ANY screen —
+ * including mid-game and on the results/aborted screens — because the log is
+ * most useful exactly when a failure just happened. Taps on interactive
+ * controls (buttons, cards, inputs, board dots) are ignored so it never
+ * interferes with gameplay; an accidental open is harmless and dismissible.
+ */
+function setupDiagnosticsGesture() {
+  const interactive = 'button, a, input, textarea, select, label, [role="button"],'
+    + ' .game-card, [data-hand-index], [data-draw-source], [data-card-index],'
+    + ' [data-action], .card, svg, canvas';
+  let taps = 0;
+  let timer = null;
+  document.addEventListener('click', (event) => {
+    if (document.getElementById('diagnostics-overlay')) return;
+    if (event.target.closest(interactive)) return;
+    taps += 1;
+    clearTimeout(timer);
+    timer = setTimeout(() => { taps = 0; }, 2000);
+    if (taps >= 5) {
+      taps = 0;
+      clearTimeout(timer);
+      showDiagnosticsOverlay();
+    }
+  }, true);
+}
+
 function roomEntries(room) {
   return Object.entries(room.players || {})
     .filter(([, player]) => player?.name)
@@ -255,7 +394,7 @@ async function buildRuntime(gameId) {
   const commonCallbacks = {
     onError: (error) => {
       console.error(`[CardGamesMP:${gameId}]`, error);
-      showToast(errorMessage(error), 3000);
+      showToast(errorMessage(error, `runtime:${gameId}`), 3000);
     },
     onDisconnected: ({ removed = false, roomDeleted = false } = {}) => {
       if (runtime === candidate) {
@@ -464,7 +603,7 @@ async function runBusy(button, busyText, operation) {
     return await operation();
   } catch (error) {
     console.error('[CardGamesMP]', error);
-    showToast(errorMessage(error), 3000);
+    showToast(errorMessage(error, busyText || 'action'), 3000);
   } finally {
     button.disabled = false;
     button.textContent = original;
@@ -941,6 +1080,7 @@ async function bootstrap() {
     if (gameId === 'bluff') showScreen('bl-online-choice');
   });
   showScreen('landing-page');
+  setupDiagnosticsGesture();
   setupServiceWorkerUpdates().catch((error) => console.warn('[CardGamesMP] Service worker unavailable:', error));
 
   const params = new URLSearchParams(location.search);
