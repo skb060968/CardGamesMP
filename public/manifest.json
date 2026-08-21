@@ -1,6 +1,6 @@
 {
-  "name": "CardGamesMP",
-  "short_name": "CardGamesMP",
+  "name": "Card Games MP",
+  "short_name": "Card Games MP",
   "description": "Hardened multiplayer card games to play online with friends.",
   "start_url": "/",
   "scope": "/",

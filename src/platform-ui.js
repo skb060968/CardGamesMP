@@ -144,6 +144,13 @@ export function showModal(options) {
 
   cancelBtn.style.display = options.showCancel === false ? 'none' : '';
 
+  // Optional custom button labels; originals are restored on cleanup so other
+  // dialogs that rely on the default labels are unaffected.
+  const originalOkText = okBtn.textContent;
+  const originalCancelText = cancelBtn.textContent;
+  if (options.confirmText) okBtn.textContent = options.confirmText;
+  if (options.cancelText) cancelBtn.textContent = options.cancelText;
+
   overlay.removeAttribute('hidden');
 
   // Focus the input or OK button
@@ -156,6 +163,8 @@ export function showModal(options) {
   return new Promise((resolve) => {
     function cleanup() {
       overlay.setAttribute('hidden', '');
+      okBtn.textContent = originalOkText;
+      cancelBtn.textContent = originalCancelText;
       okBtn.removeEventListener('click', onOk);
       cancelBtn.removeEventListener('click', onCancel);
     }
