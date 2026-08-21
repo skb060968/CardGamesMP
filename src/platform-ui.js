@@ -183,3 +183,55 @@ export function showModal(options) {
     cancelBtn.addEventListener('click', onCancel);
   });
 }
+
+/**
+ * Self-contained confirmation dialog. Builds its own <dialog> element (so it
+ * needs no pre-existing markup) and never uses window.confirm, so the browser
+ * does not prefix it with the site address. Resolves true when confirmed,
+ * false when cancelled or dismissed.
+ * @param {string} message
+ * @param {{confirmText?: string, cancelText?: string}} [options]
+ * @returns {Promise<boolean>}
+ */
+export function showConfirm(message, { confirmText = 'Confirm', cancelText = 'Cancel' } = {}) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'confirm-dialog';
+
+    const text = document.createElement('p');
+    text.className = 'confirm-message';
+    text.textContent = message;
+
+    const actions = document.createElement('div');
+    actions.className = 'confirm-actions';
+
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'confirm-cancel';
+    cancel.textContent = cancelText;
+
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'confirm-ok';
+    confirm.textContent = confirmText;
+
+    actions.append(cancel, confirm);
+    dialog.append(text, actions);
+    document.body.append(dialog);
+
+    let settled = false;
+    const close = (result) => {
+      if (settled) return;
+      settled = true;
+      try { dialog.close(); } catch (_) {}
+      dialog.remove();
+      resolve(result);
+    };
+    cancel.addEventListener('click', () => close(false));
+    confirm.addEventListener('click', () => close(true));
+    dialog.addEventListener('cancel', (event) => { event.preventDefault(); close(false); });
+
+    dialog.showModal();
+    confirm.focus();
+  });
+}

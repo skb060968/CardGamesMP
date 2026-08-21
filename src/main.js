@@ -52,7 +52,7 @@ import {
 } from './shared/voice-announcer.js';
 import { createShareHandler, showQRCode } from './deep-link-handler.js';
 import { normalizeRoomCode } from './core/room-code.js';
-import { renderLandingPage, showModal, showScreen, showToast } from './platform-ui.js';
+import { renderLandingPage, showConfirm, showScreen, showToast } from './platform-ui.js';
 import { createPatteParPattaEffects, createPatteParPattaRuntime } from './games/patte-par-patta/index.js';
 import { createFlipAndMatchEffects, createFlipAndMatchRuntime } from './games/flip-and-match/index.js';
 import { createSimpleRummyEffects, createSimpleRummyRuntime } from './games/simple-rummy/index.js';
@@ -1039,13 +1039,11 @@ function setupEndGameControls() {
         syncVisibility();
         return;
       }
-      const confirmed = await showModal({
-        title: 'End this game for everyone?',
-        showCancel: true,
+      const confirmed = await showConfirm('End this game for everyone?', {
         confirmText: 'End game',
         cancelText: 'Keep playing',
       });
-      if (confirmed === null) return;
+      if (!confirmed) return;
 
       button.disabled = true;
       try {

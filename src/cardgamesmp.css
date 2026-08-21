@@ -34,3 +34,45 @@
 @media (prefers-reduced-motion: reduce) {
   .update-toast[aria-busy="true"] #update-now::before { animation: none; }
 }
+
+/* Custom End Game confirmation dialog (URL-free, replaces window.confirm). */
+.confirm-dialog {
+  border: 1px solid #cbd5e1;
+  border-radius: 16px;
+  padding: 22px;
+  width: min(90vw, 340px);
+  text-align: center;
+  color: #14213d;
+  background: linear-gradient(135deg, #eef2ff 0%, #ecfeff 55%, #fdf2f8 100%);
+  box-shadow: 0 20px 60px rgba(20, 33, 61, 0.5);
+}
+.confirm-dialog::backdrop {
+  background: rgba(20, 33, 61, 0.55);
+}
+.confirm-dialog .confirm-message {
+  margin: 0 0 16px;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.confirm-dialog .confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.confirm-dialog .confirm-actions button {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.confirm-dialog .confirm-cancel {
+  background: #e2e8f0;
+  color: #14213d;
+}
+.confirm-dialog .confirm-ok {
+  background: #dc2626;
+  color: #fff;
+}
