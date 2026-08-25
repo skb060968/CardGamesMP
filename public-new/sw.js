@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'cardgamesmp-app-';
-const CACHE_VERSION = 'v41';
+const CACHE_VERSION = 'v42';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 
 self.addEventListener('install', (event) => {
@@ -69,6 +69,8 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  // Never intercept/cache API calls (e.g. the LiveKit token endpoint).
+  if (url.pathname.startsWith('/api/')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(networkFirst(request, true));

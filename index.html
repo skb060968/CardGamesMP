@@ -95,9 +95,7 @@
       <div id="event-bar" class="event-bar" aria-live="polite"></div>
       <div id="bottom-players" class="players-row" aria-label="Bottom players"></div>
       <div class="game-controls">
-        <label class="mute-toggle" for="mute-toggle">
-          <input id="mute-toggle" type="checkbox"> 🔇 Mute
-        </label>
+        <button id="mute-toggle" class="mute-toggle" type="button" aria-label="Mute game sound" aria-pressed="false">🔊</button>
         <button id="btn-end-game" class="btn-end-game" type="button" hidden>✕</button>
       </div>
     </section>
@@ -164,7 +162,7 @@
       <div id="fm-event-bar" class="event-bar" aria-live="polite"></div>
       <div id="fm-grid-area" class="fm-grid-area" aria-label="Card grid"></div>
       <div id="fm-self-area" class="fm-self-area" aria-label="Your info"></div>
-      <div class="game-controls"><label class="mute-toggle" for="fm-mute-toggle"><input id="fm-mute-toggle" type="checkbox"> 🔇 Mute</label><button id="fm-btn-end-game" class="btn-end-game" type="button" hidden>✕</button></div>
+      <div class="game-controls"><button id="fm-mute-toggle" class="mute-toggle" type="button" aria-label="Mute game sound" aria-pressed="false">🔊</button><button id="fm-btn-end-game" class="btn-end-game" type="button" hidden>✕</button></div>
     </section>
 
     <section id="fm-results" class="screen" hidden aria-label="Flip & Match results">
@@ -240,7 +238,7 @@
         </div>
         <p class="sr-reorder-hint">Swipe a card sideways to reposition it</p>
       </div>
-      <div class="game-controls"><label class="mute-toggle" for="sr-mute-toggle"><input id="sr-mute-toggle" type="checkbox"> 🔇 Mute</label></div>
+      <div class="game-controls"><button id="sr-mute-toggle" class="mute-toggle" type="button" aria-label="Mute game sound" aria-pressed="false">🔊</button></div>
     </section>
 
     <section id="sr-results" class="screen" hidden aria-label="Simple Rummy results">
@@ -316,7 +314,7 @@
         </div>
         <p class="pt-reorder-hint">Swipe a card sideways to place it exactly where you want</p>
       </div>
-      <div class="game-controls"><label class="mute-toggle" for="pt-mute-toggle"><input id="pt-mute-toggle" type="checkbox"> 🔇 Mute</label></div>
+      <div class="game-controls"><button id="pt-mute-toggle" class="mute-toggle" type="button" aria-label="Mute game sound" aria-pressed="false">🔊</button></div>
     </section>
 
     <section id="pt-results" class="screen" hidden aria-label="Perfect Ten results">
@@ -381,7 +379,7 @@
       <div id="pk-actions-area" class="pk-actions-area" aria-label="Betting actions"></div>
       <div id="pk-self-bar" class="game-self-bar" aria-label="Your info">
         <div class="game-self-info"><span id="pk-self-emoji" class="game-self-emoji"></span><span id="pk-self-name" class="game-self-name"></span></div>
-        <div class="game-self-controls"><label class="mute-toggle" for="pk-mute-toggle"><input id="pk-mute-toggle" type="checkbox"> 🔇 Mute</label></div>
+        <div class="game-self-controls"><button id="pk-mute-toggle" class="mute-toggle" type="button" aria-label="Mute game sound" aria-pressed="false">🔊</button></div>
       </div>
     </section>
 
@@ -447,7 +445,7 @@
       <div id="bl-hand-area" class="sr-hand-area bl-hand-area" aria-label="Your hand"></div>
       <div id="bl-self-bar" class="game-self-bar" aria-label="Your info">
         <div class="game-self-info"><span id="bl-self-emoji" class="game-self-emoji"></span><span id="bl-self-name" class="game-self-name"></span></div>
-        <div class="game-self-controls"><label class="mute-toggle" for="bl-mute-toggle"><input id="bl-mute-toggle" type="checkbox"> 🔇 Mute</label></div>
+        <div class="game-self-controls"><button id="bl-mute-toggle" class="mute-toggle" type="button" aria-label="Mute game sound" aria-pressed="false">🔊</button></div>
       </div>
     </section>
 
@@ -460,6 +458,12 @@
 
     <div id="bl-rank-selector" class="bl-rank-overlay" hidden aria-label="Rank selector"></div>
     <div id="bl-challenge-result" class="bl-challenge-result-overlay" hidden aria-label="Challenge result"></div>
+  </div>
+
+  <!-- Floating voice-chat dock (shown only while connected to a room). Shared
+       across all six games since they use one room connection at a time. -->
+  <div id="voice-dock" class="voice-dock" hidden>
+    <div id="voice-widget"></div>
   </div>
 
   <aside id="update-toast" class="update-toast" hidden role="status" aria-live="polite" aria-busy="false">

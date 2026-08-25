@@ -60,6 +60,7 @@ import { createPerfectTenEffects, createPerfectTenRuntime } from './games/perfec
 import { createPokerEffects, createPokerRuntime } from './games/poker/index.js';
 import { createBluffEffects, createBluffRuntime } from './games/bluff/index.js';
 import { createFirebaseClient } from './platform/firebase-client.js';
+import { mountVoiceChat } from './platform/voice-chat-widget.js';
 import { createServiceWorkerUpdateClient } from './platform/service-worker-update.js';
 import { clearDiagnostics, formatDiagnostics, recordDiagnostic } from './platform/diagnostics.js';
 import { GAMES } from './games/registry.js';
@@ -73,6 +74,58 @@ const selectedEmoji = (screenId) =>
 let runtime = null;
 let activeGameId = null;
 let firebaseClientPromise = null;
+let voiceWidget = null;
+
+/* ======= VOICE CHAT (optional, LiveKit, voice-only) =======
+ * One shared floating widget for all six games — they use a single room
+ * connection at a time. Mounted once; revealed on room connect, hidden and
+ * torn down on leave/disconnect. Identity + room read live from `runtime`.
+ */
+function initVoiceWidget() {
+  if (voiceWidget) return;
+  voiceWidget = mountVoiceChat({
+    mount: '#voice-widget',
+    game: 'cardsmp',
+    getRoomCode: () => runtime?.roomCode || null,
+    getIdentity: () => (runtime && runtime.playerIndex >= 0 ? `player_${runtime.playerIndex}` : null),
+    getDisplayName: () => (runtime && runtime.playerIndex >= 0 ? `Player ${runtime.playerIndex + 1}` : 'Player'),
+    getIdToken: async () => {
+      const client = await firebaseClient();
+      return client.user.getIdToken();
+    },
+    notify: (message) => showToast(message, 3000),
+  });
+}
+
+/** Reveal the floating voice dock once we are connected to a room. */
+function showVoiceDock() {
+  initVoiceWidget();
+  const dock = element('voice-dock');
+  if (dock) dock.hidden = false;
+}
+
+/** Leave any voice call and hide the dock when leaving the room. */
+function hideVoiceDock() {
+  if (voiceWidget) { try { voiceWidget.stop(); } catch (_) {} }
+  const dock = element('voice-dock');
+  if (dock) dock.hidden = true;
+}
+
+/** Render a game-sound mute button (🔊 / 🔇) to match its muted state. */
+function renderMuteButton(button, muted) {
+  if (!button) return;
+  button.textContent = muted ? '🔇' : '🔊';
+  button.setAttribute('aria-pressed', String(muted));
+  button.setAttribute('aria-label', muted ? 'Unmute game sound' : 'Mute game sound');
+}
+
+/** Wire a game-sound mute icon button to the shared audio mute state. */
+function wireMuteButton(id) {
+  const button = element(id);
+  if (!button) return;
+  renderMuteButton(button, isMuted());
+  button.addEventListener('click', () => renderMuteButton(button, toggleMute()));
+}
 
 function errorChain(error) {
   const chain = [];
@@ -400,6 +453,7 @@ async function buildRuntime(gameId) {
       if (runtime === candidate) {
         runtime = null;
         activeGameId = null;
+        hideVoiceDock();
         showScreen('landing-page');
         if (removed) showToast('The host removed you from the lobby.', 3500);
         else if (roomDeleted) showToast('The room was closed by the host.', 3500);
@@ -581,7 +635,9 @@ async function ensureRuntime(gameId) {
 async function connectToRoom(gameId, operation) {
   const activeRuntime = await ensureRuntime(gameId);
   try {
-    return await operation(activeRuntime);
+    const result = await operation(activeRuntime);
+    showVoiceDock();
+    return result;
   } catch (error) {
     if (!activeRuntime.connected) {
       if (runtime === activeRuntime) {
@@ -641,6 +697,7 @@ async function leaveCurrentRoom() {
   const current = runtime;
   runtime = null;
   activeGameId = null;
+  hideVoiceDock();
   if (current?.connected) await current.leaveRoom();
   else await current?.close();
   showScreen('landing-page');
@@ -687,9 +744,7 @@ function wirePPP() {
   element('btn-qr-code').addEventListener('click', () => {
     if (runtime?.roomCode) showQRCode(runtime.roomCode, 'Patte Par Patta', 'patte-par-patta');
   });
-  const mute = element('mute-toggle');
-  mute.checked = isMuted();
-  mute.addEventListener('change', () => { mute.checked = toggleMute(); });
+  wireMuteButton('mute-toggle');
 }
 function wireFlipAndMatch() {
   wireLobbyRemoval('fm-lobby-player-list', 'flip-and-match');
@@ -724,9 +779,7 @@ function wireFlipAndMatch() {
   element('fm-btn-qr-code').addEventListener('click', () => {
     if (runtime?.roomCode) showQRCode(runtime.roomCode, 'Flip & Match', 'flip-and-match');
   });
-  const mute = element('fm-mute-toggle');
-  mute.checked = isMuted();
-  mute.addEventListener('change', () => { mute.checked = toggleMute(); });
+  wireMuteButton('fm-mute-toggle');
 }
 
 function wireSimpleRummy() {
@@ -765,9 +818,7 @@ function wireSimpleRummy() {
   element('sr-btn-qr-code').addEventListener('click', () => {
     if (runtime?.roomCode) showQRCode(runtime.roomCode, 'Simple Rummy', 'simple-rummy');
   });
-  const mute = element('sr-mute-toggle');
-  mute.checked = isMuted();
-  mute.addEventListener('change', () => { mute.checked = toggleMute(); });
+  wireMuteButton('sr-mute-toggle');
 }
 
 function wirePerfectTen() {
@@ -806,9 +857,7 @@ function wirePerfectTen() {
   element('pt-btn-qr-code').addEventListener('click', () => {
     if (runtime?.roomCode) showQRCode(runtime.roomCode, 'Perfect Ten', 'perfect-ten');
   });
-  const mute = element('pt-mute-toggle');
-  mute.checked = isMuted();
-  mute.addEventListener('change', () => { mute.checked = toggleMute(); });
+  wireMuteButton('pt-mute-toggle');
 }
 
 function wirePoker() {
@@ -844,9 +893,7 @@ function wirePoker() {
   element('pk-btn-qr-code').addEventListener('click', () => {
     if (runtime?.roomCode) showQRCode(runtime.roomCode, 'Poker', 'poker');
   });
-  const mute = element('pk-mute-toggle');
-  mute.checked = isMuted();
-  mute.addEventListener('change', () => { mute.checked = toggleMute(); });
+  wireMuteButton('pk-mute-toggle');
 }
 
 function wireBluff() {
@@ -882,9 +929,7 @@ function wireBluff() {
   element('bl-btn-qr-code').addEventListener('click', () => {
     if (runtime?.roomCode) showQRCode(runtime.roomCode, 'Bluff', 'bluff');
   });
-  const mute = element('bl-mute-toggle');
-  mute.checked = isMuted();
-  mute.addEventListener('change', () => { mute.checked = toggleMute(); });
+  wireMuteButton('bl-mute-toggle');
 }
 
 async function restoreSession() {
@@ -962,11 +1007,11 @@ async function setupServiceWorkerUpdates() {
 }
 let syncEndGameControlVisibility = () => {};
 
-const MUTE_TOGGLE_SELECTOR = '.mute-toggle input[type="checkbox"]';
+const MUTE_TOGGLE_SELECTOR = 'button.mute-toggle';
 
 function syncMuteToggles(muted = isMuted()) {
-  document.querySelectorAll(MUTE_TOGGLE_SELECTOR).forEach((toggle) => {
-    toggle.checked = muted;
+  document.querySelectorAll(MUTE_TOGGLE_SELECTOR).forEach((button) => {
+    renderMuteButton(button, muted);
   });
 }
 
