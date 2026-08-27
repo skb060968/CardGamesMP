@@ -483,7 +483,6 @@ body {
   gap: var(--gap-sm);
   padding: 4px 8px;
   min-height: 100svh;
-  justify-content: space-between;
 }
 
 /* Players row: decks side by side */
@@ -585,10 +584,17 @@ body {
   padding: 6px 0;
 }
 
-/* Absorb the space-between free space above the bottom players so the controls
-   card sits directly under them instead of pinned to the bottom of the screen. */
+/* Split the free vertical space equally above the pile and above the bottom
+   row: this centers the pile between the two player rows while keeping the
+   controls card tucked directly under the bottom players. */
+#ppp-gameplay #pile-area,
 #ppp-gameplay #bottom-players {
   margin-top: auto;
+}
+
+/* Bottom players sit right on top of the controls card, no extra gap. */
+#ppp-gameplay #bottom-players {
+  margin-bottom: 0;
 }
 
 /* Patte Par Patta: bottom controls styled as a single "player card" holding
