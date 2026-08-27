@@ -76,6 +76,14 @@ let activeGameId = null;
 let firebaseClientPromise = null;
 let voiceWidget = null;
 
+/* Games whose controls row hosts the voice pill inline. The single shared
+ * widget node is relocated into the matching slot; other games use the
+ * floating dock. */
+const VOICE_SLOT_BY_GAME = Object.freeze({
+  'patte-par-patta': 'ppp-voice-slot',
+  'flip-and-match': 'fm-voice-slot',
+});
+
 /* ======= VOICE CHAT (optional, LiveKit, voice-only) =======
  * One shared floating widget for all six games — they use a single room
  * connection at a time. Mounted once; revealed on room connect, hidden and
@@ -104,7 +112,8 @@ function showVoiceDock() {
   initVoiceWidget();
   const widget = element('voice-widget');
   const dock = element('voice-dock');
-  const slot = activeGameId === 'patte-par-patta' ? element('ppp-voice-slot') : null;
+  const slotId = VOICE_SLOT_BY_GAME[activeGameId] || null;
+  const slot = slotId ? element(slotId) : null;
   if (slot && widget) {
     if (widget.parentElement !== slot) slot.appendChild(widget);
     if (dock) dock.hidden = true;
