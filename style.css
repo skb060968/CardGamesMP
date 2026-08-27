@@ -585,6 +585,30 @@ body {
   padding: 6px 0;
 }
 
+/* Patte Par Patta: bottom controls styled as a single "player card" holding
+   the voice pill, game-sound mute, and host end-game button side by side. */
+#ppp-gameplay .game-controls {
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  width: -moz-fit-content;
+  width: fit-content;
+  max-width: 100%;
+  margin: 6px auto 0;
+}
+
+/* In-game voice slot: hosts the shared voice pill inline with the controls. */
+.voice-slot {
+  display: inline-flex;
+  align-items: center;
+}
+
+.voice-slot:empty {
+  display: none;
+}
+
 .mute-toggle {
   width: 34px;
   height: 34px;

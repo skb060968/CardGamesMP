@@ -97,11 +97,21 @@ function initVoiceWidget() {
   });
 }
 
-/** Reveal the floating voice dock once we are connected to a room. */
+/** Reveal the voice widget once connected to a room. Converted games host the
+ *  pill inside their own controls row; the rest use the floating dock. The
+ *  single shared widget node is relocated into the active game's slot. */
 function showVoiceDock() {
   initVoiceWidget();
+  const widget = element('voice-widget');
   const dock = element('voice-dock');
-  if (dock) dock.hidden = false;
+  const slot = activeGameId === 'patte-par-patta' ? element('ppp-voice-slot') : null;
+  if (slot && widget) {
+    if (widget.parentElement !== slot) slot.appendChild(widget);
+    if (dock) dock.hidden = true;
+  } else {
+    if (widget && dock && widget.parentElement !== dock) dock.appendChild(widget);
+    if (dock) dock.hidden = false;
+  }
 }
 
 /** Leave any voice call and hide the dock when leaving the room. */
