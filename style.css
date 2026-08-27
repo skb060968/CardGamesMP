@@ -1892,12 +1892,6 @@ body {
   white-space: nowrap;
 }
 
-.fm-block-count {
-  font-size: 0.65rem;
-  font-weight: 800;
-  opacity: 0.8;
-}
-
 /* --- Won cards mini deck --- */
 .fm-won-deck {
   display: flex;
@@ -1935,14 +1929,19 @@ body {
 }
 
 .fm-won-badge {
-  font-size: 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 50%;
+  font-size: 0.6rem;
   font-weight: 800;
   background: var(--color-accent);
   color: #1a1a1a;
-  border-radius: 8px;
-  padding: 1px 4px;
-  margin-left: 3px;
-  line-height: 1.2;
+  margin-left: 5px;
+  line-height: 1;
 }
 
 /* --- Self block (bottom) --- */

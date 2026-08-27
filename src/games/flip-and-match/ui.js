@@ -72,18 +72,12 @@ function renderOpponentBlocks(container, players, currentPlayerIndex, localPlaye
     name.className = 'fm-block-name';
     name.textContent = player.name;
 
-    // Won count
+    // Won cards mini deck (count is shown in the deck's yellow badge)
     const count = player.collected ? player.collected.length : 0;
-    const countEl = document.createElement('span');
-    countEl.className = 'fm-block-count';
-    countEl.textContent = `🃏 ${count}`;
-
-    // Won cards mini deck
     const deck = buildWonCardsDeck(count);
 
     block.appendChild(emoji);
     block.appendChild(name);
-    block.appendChild(countEl);
     block.appendChild(deck);
     container.appendChild(block);
   });
@@ -117,15 +111,11 @@ function renderSelfBlock(container, players, currentPlayerIndex, localPlayerInde
   name.textContent = 'You';
 
   const count = player.collected ? player.collected.length : 0;
-  const countEl = document.createElement('span');
-  countEl.className = 'fm-block-count';
-  countEl.textContent = `🃏 ${count}`;
 
   info.appendChild(emoji);
   info.appendChild(name);
-  info.appendChild(countEl);
 
-  // Right side: won cards mini deck
+  // Right side: won cards mini deck (count is shown in the deck's yellow badge)
   const deck = buildWonCardsDeck(count);
 
   block.appendChild(info);
