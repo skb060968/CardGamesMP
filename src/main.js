@@ -949,6 +949,7 @@ async function restoreSession() {
       runtime = candidate;
       activeGameId = gameId;
       syncEndGameControlVisibility();
+      showVoiceDock();
       return true;
     }
     await candidate.close();

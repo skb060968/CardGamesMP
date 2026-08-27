@@ -585,6 +585,12 @@ body {
   padding: 6px 0;
 }
 
+/* Absorb the space-between free space above the bottom players so the controls
+   card sits directly under them instead of pinned to the bottom of the screen. */
+#ppp-gameplay #bottom-players {
+  margin-top: auto;
+}
+
 /* Patte Par Patta: bottom controls styled as a single "player card" holding
    the voice pill, game-sound mute, and host end-game button side by side. */
 #ppp-gameplay .game-controls {
@@ -596,7 +602,7 @@ body {
   width: -moz-fit-content;
   width: fit-content;
   max-width: 100%;
-  margin: 6px auto 0;
+  margin: 0 auto;
 }
 
 /* In-game voice slot: hosts the shared voice pill inline with the controls. */
