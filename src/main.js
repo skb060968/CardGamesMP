@@ -82,6 +82,10 @@ let voiceWidget = null;
 const VOICE_SLOT_BY_GAME = Object.freeze({
   'patte-par-patta': 'ppp-voice-slot',
   'flip-and-match': 'fm-voice-slot',
+  'simple-rummy': 'sr-voice-slot',
+  'perfect-ten': 'pt-voice-slot',
+  'poker': 'pk-voice-slot',
+  'bluff': 'bl-voice-slot',
 });
 
 /* ======= VOICE CHAT (optional, LiveKit, voice-only) =======
