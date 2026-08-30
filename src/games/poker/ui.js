@@ -228,9 +228,11 @@ export function renderLobbyPlayers(players, isHost, playerKeys = []) {
   if (!list) return;
   players.forEach((player, index) => {
     const item = document.createElement('li');
+    if (player.connected === false) item.classList.add('disconnected');
     appendText(item, 'pk-lobby-emoji', player.emoji || '😀');
     const name = appendText(item, 'pk-lobby-name', player.name || `Player ${index + 1}`);
     name.style.flex = '1';
+    if (player.connected === false) appendText(item, 'offline-badge', 'OFFLINE');
     if (index === 0) appendText(item, 'host-badge', 'HOST');
     else if (isHost && playerKeys[index]) {
       const button = document.createElement('button');

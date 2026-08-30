@@ -448,49 +448,59 @@ function renderPPPLobby({ room, roomCode, isHost, roomSlotIndex }) {
   });
 }
 
-function renderFMLobby({ room, roomCode, isHost }) {
-  const entries = roomEntries(room);
-  element('fm-lobby-room-code').textContent = roomCode;
-  renderFMLobbyPlayers(entries.map(([, player]) => player), isHost, entries.map(([key]) => key));
-  element('fm-btn-start-online').hidden = !isHost;
-  element('fm-lobby-waiting').hidden = isHost;
-  showScreen('fm-lobby');
+function renderFMLobby({ room, roomCode, isHost, roomSlotIndex }) {
+  presentLobby({
+    room, roomCode, isHost, roomSlotIndex,
+    codeId: 'fm-lobby-room-code',
+    startId: 'fm-btn-start-online',
+    waitingId: 'fm-lobby-waiting',
+    screenId: 'fm-lobby',
+    renderPlayers: renderFMLobbyPlayers,
+  });
 }
 
-function renderSRLobby({ room, roomCode, isHost }) {
-  const entries = roomEntries(room);
-  element('sr-lobby-room-code').textContent = roomCode;
-  renderSRLobbyPlayers(entries.map(([, player]) => player), isHost, entries.map(([key]) => key));
-  element('sr-btn-start-online').hidden = !isHost;
-  element('sr-lobby-waiting').hidden = isHost;
-  showScreen('sr-lobby');
+function renderSRLobby({ room, roomCode, isHost, roomSlotIndex }) {
+  presentLobby({
+    room, roomCode, isHost, roomSlotIndex,
+    codeId: 'sr-lobby-room-code',
+    startId: 'sr-btn-start-online',
+    waitingId: 'sr-lobby-waiting',
+    screenId: 'sr-lobby',
+    renderPlayers: renderSRLobbyPlayers,
+  });
 }
 
-function renderPTLobby({ room, roomCode, isHost }) {
-  const entries = roomEntries(room);
-  element('pt-lobby-room-code').textContent = roomCode;
-  renderPTLobbyPlayers(entries.map(([, player]) => player), isHost, entries.map(([key]) => key));
-  element('pt-btn-start-online').hidden = !isHost;
-  element('pt-lobby-waiting').hidden = isHost;
-  showScreen('pt-lobby');
+function renderPTLobby({ room, roomCode, isHost, roomSlotIndex }) {
+  presentLobby({
+    room, roomCode, isHost, roomSlotIndex,
+    codeId: 'pt-lobby-room-code',
+    startId: 'pt-btn-start-online',
+    waitingId: 'pt-lobby-waiting',
+    screenId: 'pt-lobby',
+    renderPlayers: renderPTLobbyPlayers,
+  });
 }
 
-function renderPKLobby({ room, roomCode, isHost }) {
-  const entries = roomEntries(room).slice(0, 4);
-  element('pk-lobby-room-code').textContent = roomCode;
-  renderPKLobbyPlayers(entries.map(([, player]) => player), isHost, entries.map(([key]) => key));
-  element('pk-btn-start-online').hidden = !isHost;
-  element('pk-lobby-waiting').hidden = isHost;
-  showScreen('pk-lobby');
+function renderPKLobby({ room, roomCode, isHost, roomSlotIndex }) {
+  presentLobby({
+    room, roomCode, isHost, roomSlotIndex, max: 4,
+    codeId: 'pk-lobby-room-code',
+    startId: 'pk-btn-start-online',
+    waitingId: 'pk-lobby-waiting',
+    screenId: 'pk-lobby',
+    renderPlayers: renderPKLobbyPlayers,
+  });
 }
 
-function renderBLLobby({ room, roomCode, isHost }) {
-  const entries = roomEntries(room).slice(0, 4);
-  element('bl-lobby-room-code').textContent = roomCode;
-  renderBLLobbyPlayers(entries.map(([, player]) => player), isHost, entries.map(([key]) => key));
-  element('bl-btn-start-online').hidden = !isHost;
-  element('bl-lobby-waiting').hidden = isHost;
-  showScreen('bl-lobby');
+function renderBLLobby({ room, roomCode, isHost, roomSlotIndex }) {
+  presentLobby({
+    room, roomCode, isHost, roomSlotIndex, max: 4,
+    codeId: 'bl-lobby-room-code',
+    startId: 'bl-btn-start-online',
+    waitingId: 'bl-lobby-waiting',
+    screenId: 'bl-lobby',
+    renderPlayers: renderBLLobbyPlayers,
+  });
 }
 
 function showPPPFinished(state, gameRuntime) {
