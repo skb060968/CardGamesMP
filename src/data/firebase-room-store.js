@@ -485,6 +485,10 @@ export function createFirebaseRoomStore({
         status: handlers.onStatus,
         reset: handlers.onReset,
         player: handlers.onPlayer,
+        // A presence change (a player going offline/online) carries no game
+        // data — it just needs the lobby to re-read the room and re-render, so
+        // it reuses the room-refresh handler unless a game supplies its own.
+        presence: handlers.onPresence || handlers.onStatus,
       }[event.type];
       if (typeof callback === 'function') callback(event.value, event);
     };
@@ -493,6 +497,7 @@ export function createFirebaseRoomStore({
       ['lastMove', 'move'],
       ['meta/status', 'status'],
       ['meta/resetAt', 'reset'],
+      ['presence', 'presence'],
       ...Array.from({ length: SLOT_COUNT }, (_, index) => [`players/${slotId(index)}`, 'player', index]),
     ];
     const unsubscribers = listeners.map(([path, type, playerIndex]) => listenValue(
