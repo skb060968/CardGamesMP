@@ -3165,3 +3165,25 @@ body {
     transition: none !important;
   }
 }
+
+/* Lobby presence: dropped players are greyed with an OFFLINE badge before they
+   are pruned (see main.js presentLobby). Scoped to the per-game lobby lists. */
+#lobby-player-list li.disconnected,
+#fm-lobby-player-list li.disconnected,
+#sr-lobby-player-list li.disconnected,
+#pt-lobby-player-list li.disconnected,
+#pk-lobby-player-list li.disconnected,
+#bl-lobby-player-list li.disconnected {
+  opacity: 0.55;
+}
+
+.offline-badge {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  background: var(--color-error, #e5484d);
+  color: #fff;
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-left: 6px;
+}

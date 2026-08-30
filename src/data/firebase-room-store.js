@@ -114,6 +114,24 @@ function uidPathKey(uid) {
   return Array.from(uid, (character) => character.codePointAt(0).toString(16)).join('-');
 }
 
+/**
+ * Presence-derived connectivity: a player is connected when their uid has at
+ * least one live entry in the room's `presence` tree. Fail-open — if the room
+ * carries no presence data at all, everyone is treated as connected so the
+ * lobby behaves exactly as before this feature existed.
+ * @param {object} room - decoded room snapshot (must include `presence`)
+ * @param {string} uid - the player's uid
+ * @returns {boolean}
+ */
+export function isPlayerConnected(room, uid) {
+  if (!room || typeof room !== 'object') return true;
+  const presence = room.presence;
+  if (!presence || typeof presence !== 'object') return true;
+  if (typeof uid !== 'string' || uid.length === 0) return true;
+  const node = presence[uidPathKey(uid)];
+  return Boolean(node && typeof node === 'object' && Object.keys(node).length > 0);
+}
+
 function cleanPlayerData(player) {
   requireObject(player, 'player');
   const copy = cloneFirebaseValue(player, 'player');

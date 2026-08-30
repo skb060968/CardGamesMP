@@ -211,6 +211,7 @@ export function renderLobbyPlayers(players, isHost, playerKeys = []) {
 
   players.forEach((player, index) => {
     const li = document.createElement('li');
+    if (player.connected === false) li.classList.add('disconnected');
 
     const emojiSpan = document.createElement('span');
     emojiSpan.textContent = player.emoji || '😀';
@@ -221,6 +222,13 @@ export function renderLobbyPlayers(players, isHost, playerKeys = []) {
 
     li.appendChild(emojiSpan);
     li.appendChild(nameSpan);
+
+    if (player.connected === false) {
+      const offline = document.createElement('span');
+      offline.className = 'offline-badge';
+      offline.textContent = 'OFFLINE';
+      li.appendChild(offline);
+    }
 
     if (index === 0) {
       const badge = document.createElement('span');

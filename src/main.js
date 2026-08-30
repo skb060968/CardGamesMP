@@ -62,7 +62,15 @@ import { createBluffEffects, createBluffRuntime } from './games/bluff/index.js';
 import { createFirebaseClient } from './platform/firebase-client.js';
 import { mountVoiceChat } from './platform/voice-chat-widget.js';
 import { createServiceWorkerUpdateClient } from './platform/service-worker-update.js';
-import { clearDiagnostics, formatDiagnostics, recordDiagnostic } from './platform/diagnostics.js';
+import {
+  clearDiagnostics, formatDiagnostics, installGlobalErrorCapture, recordDiagnostic,
+} from './platform/diagnostics.js';
+import { isPlayerConnected } from './data/firebase-room-store.js';
+
+// Capture uncaught errors / rejections into the on-device log as early as
+// possible, so anything during startup or rendering is visible via the 5-tap
+// diagnostics viewer (not just failures that reach a toast).
+installGlobalErrorCapture();
 import { GAMES } from './games/registry.js';
 
 const AVAILABLE_IDS = new Set(['patte-par-patta', 'flip-and-match', 'simple-rummy', 'perfect-ten', 'poker', 'bluff']);
@@ -351,13 +359,93 @@ function roomEntries(room) {
     .sort(([left], [right]) => Number(left.slice(7)) - Number(right.slice(7)));
 }
 
-function renderPPPLobby({ room, roomCode, isHost }) {
-  const entries = roomEntries(room);
-  element('lobby-room-code').textContent = roomCode;
-  renderPPPLobbyPlayers(entries.map(([, player]) => player), isHost, entries.map(([key]) => key));
-  element('btn-start-online').hidden = !isHost;
-  element('lobby-waiting').hidden = isHost;
-  showScreen('ppp-lobby');
+/* ---- Lobby presence (S3 offline badge, S4 connected-only Start gate, S5
+   linger-then-prune). Connected state is derived from the room's presence tree
+   (fail-open); the host (player_0) and the local player are never hidden. ---- */
+const LOBBY_MIN_CONNECTED = 2;
+const LOBBY_PRUNE_DELAY_MS = 2500;
+let lobbyDisconnectedSince = {};
+let lobbyPruneTimer = null;
+let rerenderLobby = null;
+
+function isLobbyEntryVisible(key, connected, roomSlotIndex) {
+  if (connected) return true;
+  if (key === 'player_0') return true;
+  if (Number.isInteger(roomSlotIndex) && key === `player_${roomSlotIndex}`) return true;
+  const since = lobbyDisconnectedSince[key];
+  return typeof since === 'number' && Date.now() - since < LOBBY_PRUNE_DELAY_MS;
+}
+
+function trackLobbyDisconnections(entries, roomSlotIndex) {
+  const stamp = Date.now();
+  const next = {};
+  let pruneNeeded = false;
+  entries.forEach(({ key, connected }) => {
+    if (connected) return;
+    next[key] = lobbyDisconnectedSince[key] || stamp;
+    const exempt = key === 'player_0'
+      || (Number.isInteger(roomSlotIndex) && key === `player_${roomSlotIndex}`);
+    if (!exempt && stamp - next[key] < LOBBY_PRUNE_DELAY_MS) pruneNeeded = true;
+  });
+  lobbyDisconnectedSince = next;
+  if (!pruneNeeded || lobbyPruneTimer !== null) return;
+  lobbyPruneTimer = setTimeout(() => {
+    lobbyPruneTimer = null;
+    if (typeof rerenderLobby === 'function') rerenderLobby();
+  }, LOBBY_PRUNE_DELAY_MS);
+}
+
+/**
+ * Shared lobby renderer: annotates each player with presence-derived
+ * `connected`, hides players who have been offline past the linger window
+ * (never the host or the local player), gates the host Start button on the
+ * connected count, and re-renders when the prune window elapses.
+ */
+function presentLobby(options) {
+  const {
+    room, roomCode, isHost, roomSlotIndex,
+    codeId, startId, waitingId, screenId, renderPlayers, max,
+  } = options;
+
+  let entries = roomEntries(room).map(([key, player]) => ({
+    key,
+    player,
+    connected: isPlayerConnected(room, player.uid),
+  }));
+  if (Number.isInteger(max)) entries = entries.slice(0, max);
+
+  trackLobbyDisconnections(entries, roomSlotIndex);
+  const visible = entries.filter((entry) => isLobbyEntryVisible(entry.key, entry.connected, roomSlotIndex));
+  const connectedCount = entries.filter((entry) => entry.connected).length;
+
+  const code = element(codeId);
+  if (code) code.textContent = roomCode;
+  renderPlayers(
+    visible.map((entry) => ({ ...entry.player, connected: entry.connected })),
+    isHost,
+    visible.map((entry) => entry.key),
+  );
+  const startBtn = element(startId);
+  if (startBtn) {
+    startBtn.hidden = !isHost;
+    if (isHost) startBtn.disabled = connectedCount < LOBBY_MIN_CONNECTED;
+  }
+  const waiting = element(waitingId);
+  if (waiting) waiting.hidden = isHost;
+  showScreen(screenId);
+
+  rerenderLobby = () => presentLobby(options);
+}
+
+function renderPPPLobby({ room, roomCode, isHost, roomSlotIndex }) {
+  presentLobby({
+    room, roomCode, isHost, roomSlotIndex,
+    codeId: 'lobby-room-code',
+    startId: 'btn-start-online',
+    waitingId: 'lobby-waiting',
+    screenId: 'ppp-lobby',
+    renderPlayers: renderPPPLobbyPlayers,
+  });
 }
 
 function renderFMLobby({ room, roomCode, isHost }) {

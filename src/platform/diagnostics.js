@@ -77,3 +77,39 @@ export function formatDiagnostics() {
     })
     .join('\n\n');
 }
+
+/**
+ * Installs global handlers so uncaught errors and unhandled promise rejections
+ * are recorded to the on-device log — the app's own `errorMessage()` choke point
+ * only captures failures that reach a toast, so this is the net for render-time
+ * crashes and stray rejections that would otherwise only appear in a console.
+ * Idempotent and dependency-free; recording never throws.
+ */
+export function installGlobalErrorCapture() {
+  if (typeof window === 'undefined' || window.__cardgamesmpErrorCapture) return;
+  window.__cardgamesmpErrorCapture = true;
+
+  window.addEventListener('error', (event) => {
+    const error = event?.error;
+    const where = event?.filename
+      ? `${event.filename}:${event.lineno ?? '?'}:${event.colno ?? '?'}`
+      : '';
+    recordDiagnostic({
+      label: 'uncaught-error',
+      codes: error?.name ? [error.name] : [],
+      detail: (error && (error.stack || error.message)) || event?.message || where,
+    });
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event?.reason;
+    const codes = [];
+    if (reason?.name) codes.push(reason.name);
+    if (typeof reason?.code === 'string') codes.push(reason.code);
+    recordDiagnostic({
+      label: 'unhandled-rejection',
+      codes,
+      detail: (reason && (reason.stack || reason.message)) || String(reason),
+    });
+  });
+}
