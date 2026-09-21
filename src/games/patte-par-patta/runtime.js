@@ -1,7 +1,7 @@
 import { createActionCoordinator } from '../../core/action-coordinator.js';
 import { firebaseArray } from '../../core/firebase-array.js';
 import { generateRoomCode, normalizeRoomCode } from '../../core/room-code.js';
-import { createFirebaseRoomStore } from '../../data/firebase-room-store.js';
+import { createFirebaseRoomStore, isPlayerConnected } from '../../data/firebase-room-store.js';
 import { createGameSessionStore } from '../../platform/session-storage.js';
 import { createPatteParPattaThrowAction } from './throw-action.js';
 import { createPatteParPattaThrowTransitionValidator } from './throw-transition.js';
@@ -40,6 +40,11 @@ function sortedPlayers(room) {
     .sort(([left], [right]) => Number(left.slice(7)) - Number(right.slice(7)));
 }
 
+/** Drop-at-start (standard): only seats that are connected right now are dealt in. */
+function connectedPlayers(room) {
+  return sortedPlayers(room).filter(([, player]) => isPlayerConnected(room, player.uid));
+}
+
 export function createPatteParPattaRuntime({
   database,
   uid,
@@ -63,6 +68,7 @@ export function createPatteParPattaRuntime({
   let host = false;
   let unsubscribeRoom = null;
   let stopPresence = null;
+  let stopReconnectWatch = null;
   let disposed = false;
   let reconcileChain = Promise.resolve();
   let rosterRefreshQueued = false;
@@ -165,7 +171,7 @@ export function createPatteParPattaRuntime({
     });
   };
 
-  async function refreshRoom(move = null) {
+  async function refreshRoom(move = null, { forceSnapshot = false } = {}) {
     if (!store || disposed) return;
     let room;
     try {
@@ -192,7 +198,8 @@ export function createPatteParPattaRuntime({
       if (move?.id) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
       } else if (
-        !state
+        forceSnapshot
+        || !state
         || room.game.revision !== state.revision
         || room.game.status !== state.status
       ) {
@@ -200,6 +207,9 @@ export function createPatteParPattaRuntime({
         await effects.render({ state, playerIndex: gamePlayerIndex });
         callbacks.onState?.(state, { remote: true, move: null });
       }
+      // In-game presence (standard): the room snapshot carries `presence`, so
+      // the shell can grey out seats that have dropped mid-round.
+      callbacks.onPresence?.({ room, state });
       return;
     }
     state = room.game;
@@ -217,10 +227,15 @@ export function createPatteParPattaRuntime({
     unsubscribeRoom = store.subscribeRoom({
       onMove: (move) => enqueue(() => refreshRoom(move?.id ? move : null)),
       onStatus: () => enqueue(() => refreshRoom()),
+      onReset: () => enqueue(() => refreshRoom(null, { forceSnapshot: true })),
+      onPresence: () => enqueue(() => refreshRoom()),
       onPlayer: queueRosterRefresh,
       onError: reportError,
     });
     stopPresence = store.startPresence({ playerIndex: roomSlotIndex, onError: reportError });
+    // Reconnect reconcile (standard): after an outage, re-read the room and
+    // force a full render even if the revision looks unchanged.
+    stopReconnectWatch = store.watchReconnect(() => enqueue(() => refreshRoom(null, { forceSnapshot: true })));
 
     callbacks.onConnected?.({
       roomCode: store.roomCode,
@@ -232,6 +247,7 @@ export function createPatteParPattaRuntime({
     if (room.meta?.status === 'active') {
       await effects.render({ state, playerIndex: gamePlayerIndex });
       callbacks.onState?.(state, { remote: true, restored: true });
+      callbacks.onPresence?.({ room, state });
     } else {
       callbacks.onLobby?.({ room, roomCode: store.roomCode, isHost: host, roomSlotIndex });
     }
@@ -286,8 +302,8 @@ export function createPatteParPattaRuntime({
     ensureConnected();
     const room = await store.readRoom();
     if (room.meta?.hostUid !== uid) throw new Error('Only the host can start a round');
-    const entries = sortedPlayers(room).slice(0, MAX_PLAYERS);
-    if (entries.length < 2) throw new Error('At least two players are required');
+    const entries = connectedPlayers(room).slice(0, MAX_PLAYERS);
+    if (entries.length < 2) throw new Error('At least two connected players are required');
 
     const baseState = rules.createGame(entries.map(([, player]) => ({
       name: player.name,
@@ -305,13 +321,33 @@ export function createPatteParPattaRuntime({
     const updated = await store.resetRoom({
       state: nextState,
       status: 'active',
-      expectedRoster: Object.fromEntries(entries.map(([slot, player]) => [slot, player.uid])),
+      // The roster guard covers every seat (offline ones stay seated, they just
+      // sit this round out), so it is built from the full player list.
+      expectedRoster: Object.fromEntries(sortedPlayers(room).map(([slot, player]) => [slot, player.uid])),
     });
     state = updated.game;
     updateIdentity(updated);
     await effects.render({ state, playerIndex: gamePlayerIndex });
     callbacks.onState?.(state, { remote: false, newRound: true });
+    callbacks.onPresence?.({ room: updated, state });
     return state;
+  }
+
+  /**
+   * Play Again (standard): the host sends the whole table back to the lobby
+   * instead of dealing straight away, so latecomers can join with the same
+   * code. Every client's status listener routes to `onLobby`.
+   */
+  async function returnToLobby() {
+    ensureConnected();
+    const room = await store.readRoom();
+    if (room.meta?.hostUid !== uid) throw new Error('Only the host can start another round');
+    if (room.game?.status !== 'finished') throw new Error('The current round is not finished');
+    const updated = await store.resetRoom({ state: waitingState(), status: 'waiting' });
+    state = updated.game;
+    updateIdentity(updated);
+    callbacks.onLobby?.({ room: updated, roomCode: store.roomCode, isHost: host, roomSlotIndex });
+    return updated;
   }
 
 
@@ -331,6 +367,7 @@ export function createPatteParPattaRuntime({
 
   async function disconnectLocal({ suppressErrors = false } = {}) {
     if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
+    if (stopReconnectWatch) { stopReconnectWatch(); stopReconnectWatch = null; }
     if (stopPresence) {
       const stop = stopPresence;
       stopPresence = null;
@@ -365,7 +402,7 @@ export function createPatteParPattaRuntime({
     joinRoom,
     restoreSession,
     startRound,
-    playAgain: startRound,
+    playAgain: returnToLobby,
     removePlayer: removeLobbyPlayer,
     throwCard: throwLocalCard,
     leaveRoom,

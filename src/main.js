@@ -1,3 +1,6 @@
+// On-device diagnostics: self-installs error capture + the 5-tap viewer. MUST be the
+// first import so startup failures are recorded too (platform standard, §14a).
+import { recordDiagnostic, setDiagnosticsContext } from './platform/diagnostics.js';
 import '../style.css';
 import './cardgamesmp.css';
 import * as pppRules from './games/patte-par-patta/engine.js';
@@ -62,15 +65,7 @@ import { createBluffEffects, createBluffRuntime } from './games/bluff/index.js';
 import { createFirebaseClient } from './platform/firebase-client.js';
 import { mountVoiceChat } from './platform/voice-chat-widget.js';
 import { createServiceWorkerUpdateClient } from './platform/service-worker-update.js';
-import {
-  clearDiagnostics, formatDiagnostics, installGlobalErrorCapture, recordDiagnostic,
-} from './platform/diagnostics.js';
 import { isPlayerConnected } from './data/firebase-room-store.js';
-
-// Capture uncaught errors / rejections into the on-device log as early as
-// possible, so anything during startup or rendering is visible via the 5-tap
-// diagnostics viewer (not just failures that reach a toast).
-installGlobalErrorCapture();
 import { GAMES } from './games/registry.js';
 
 const AVAILABLE_IDS = new Set(['patte-par-patta', 'flip-and-match', 'simple-rummy', 'perfect-ten', 'poker', 'bluff']);
@@ -81,6 +76,14 @@ const selectedEmoji = (screenId) =>
 
 let runtime = null;
 let activeGameId = null;
+setDiagnosticsContext(() => ({
+  game: activeGameId,
+  room: runtime?.roomCode,
+  seat: runtime?.playerSlotIndex,
+  host: runtime?.isHost,
+  revision: runtime?.currentState?.revision,
+  status: runtime?.currentState?.status,
+}));
 let firebaseClientPromise = null;
 let voiceWidget = null;
 
@@ -250,109 +253,6 @@ function errorMessage(error, context = 'action') {
   return friendly;
 }
 
-/**
- * Builds a lightweight on-device diagnostics viewer so an operator can read or
- * copy the recorded failure log directly on any phone (no console needed).
- * Opened by a discreet 5-tap gesture on the landing page.
- */
-function showDiagnosticsOverlay() {
-  if (document.getElementById('diagnostics-overlay')) return;
-  const overlay = document.createElement('div');
-  overlay.id = 'diagnostics-overlay';
-  overlay.setAttribute('role', 'dialog');
-  overlay.setAttribute('aria-label', 'Diagnostics log');
-  Object.assign(overlay.style, {
-    position: 'fixed', inset: '0', zIndex: '10000', display: 'flex',
-    flexDirection: 'column', gap: '10px', padding: '16px',
-    background: 'rgba(8, 13, 20, 0.92)', color: '#f8fafc',
-    font: '13px/1.4 ui-monospace, Menlo, Consolas, monospace',
-  });
-
-  const title = document.createElement('strong');
-  title.textContent = 'Diagnostics (recent failures)';
-  title.style.fontSize = '15px';
-
-  const area = document.createElement('textarea');
-  area.readOnly = true;
-  area.value = formatDiagnostics();
-  Object.assign(area.style, {
-    flex: '1', width: '100%', resize: 'none', borderRadius: '10px',
-    border: '1px solid #334155', padding: '10px', background: '#0f172a',
-    color: '#e2e8f0', font: 'inherit', whiteSpace: 'pre', overflow: 'auto',
-  });
-
-  const row = document.createElement('div');
-  Object.assign(row.style, { display: 'flex', gap: '8px', flexWrap: 'wrap' });
-  const makeButton = (label) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = label;
-    Object.assign(button.style, {
-      flex: '1', minWidth: '90px', padding: '11px 14px', borderRadius: '10px',
-      border: '0', fontWeight: '700', cursor: 'pointer',
-    });
-    return button;
-  };
-  const copyButton = makeButton('Copy');
-  copyButton.style.background = '#38bdf8';
-  copyButton.style.color = '#082f49';
-  const clearButton = makeButton('Clear');
-  clearButton.style.background = '#f59e0b';
-  clearButton.style.color = '#451a03';
-  const closeButton = makeButton('Close');
-  closeButton.style.background = '#334155';
-  closeButton.style.color = '#f8fafc';
-
-  copyButton.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(area.value);
-      copyButton.textContent = 'Copied';
-    } catch (_) {
-      area.focus();
-      area.select();
-      copyButton.textContent = 'Select + copy';
-    }
-    setTimeout(() => { copyButton.textContent = 'Copy'; }, 1500);
-  });
-  clearButton.addEventListener('click', () => {
-    clearDiagnostics();
-    area.value = formatDiagnostics();
-  });
-  closeButton.addEventListener('click', () => overlay.remove());
-
-  row.append(copyButton, clearButton, closeButton);
-  overlay.append(title, area, row);
-  document.body.appendChild(overlay);
-}
-
-/**
- * Wires the discreet 5-tap gesture (within 2s) that opens the diagnostics
- * viewer. Attached at the document level so it is reachable on ANY screen —
- * including mid-game and on the results/aborted screens — because the log is
- * most useful exactly when a failure just happened. Taps on interactive
- * controls (buttons, cards, inputs, board dots) are ignored so it never
- * interferes with gameplay; an accidental open is harmless and dismissible.
- */
-function setupDiagnosticsGesture() {
-  const interactive = 'button, a, input, textarea, select, label, [role="button"],'
-    + ' .game-card, [data-hand-index], [data-draw-source], [data-card-index],'
-    + ' [data-action], .card, svg, canvas';
-  let taps = 0;
-  let timer = null;
-  document.addEventListener('click', (event) => {
-    if (document.getElementById('diagnostics-overlay')) return;
-    if (event.target.closest(interactive)) return;
-    taps += 1;
-    clearTimeout(timer);
-    timer = setTimeout(() => { taps = 0; }, 2000);
-    if (taps >= 5) {
-      taps = 0;
-      clearTimeout(timer);
-      showDiagnosticsOverlay();
-    }
-  }, true);
-}
-
 function roomEntries(room) {
   return Object.entries(room.players || {})
     .filter(([, player]) => player?.name)
@@ -503,6 +403,45 @@ function renderBLLobby({ room, roomCode, isHost, roomSlotIndex }) {
   });
 }
 
+/* ---- In-game presence (standard): seats whose player has dropped are greyed
+   and tagged OFF. The runtime hands us the latest room snapshot (players +
+   presence) on every presence/refresh tick; because each game's renderer
+   rebuilds the seat DOM, the badges are re-applied after every `onState` too.
+   Seat nodes are identified by `[data-player-index]` (game seat index) inside
+   the game's gameplay screen; the local seat is never marked offline. ---- */
+const GAMEPLAY_SCREEN_BY_GAME = Object.freeze({
+  'patte-par-patta': 'ppp-gameplay',
+  'flip-and-match': 'fm-gameplay',
+  'simple-rummy': 'sr-gameplay',
+  'perfect-ten': 'pt-gameplay',
+  'poker': 'pk-gameplay',
+  'bluff': 'bl-gameplay',
+});
+let presenceRoom = null;
+
+function syncSeatPresence() {
+  const screenId = GAMEPLAY_SCREEN_BY_GAME[activeGameId];
+  const screen = screenId ? element(screenId) : null;
+  const state = runtime?.currentState;
+  if (!screen || !presenceRoom || !Array.isArray(state?.playerSlots)) return;
+  state.playerSlots.forEach((slot, seat) => {
+    const uid = presenceRoom.players?.[slot]?.uid;
+    const offline = seat !== runtime.playerIndex && !isPlayerConnected(presenceRoom, uid);
+    screen.querySelectorAll(`[data-player-index="${seat}"]:not(.card)`).forEach((node) => {
+      node.classList.toggle('seat-offline', offline);
+      const badge = node.querySelector(':scope > .offline-badge');
+      if (offline && !badge) {
+        const tag = document.createElement('span');
+        tag.className = 'offline-badge';
+        tag.textContent = 'OFF';
+        node.appendChild(tag);
+      } else if (!offline && badge) {
+        badge.remove();
+      }
+    });
+  });
+}
+
 function showPPPFinished(state, gameRuntime) {
   showScreen('ppp-results');
   const button = element('btn-play-again');
@@ -574,11 +513,17 @@ async function buildRuntime(gameId) {
       if (runtime === candidate) {
         runtime = null;
         activeGameId = null;
+        presenceRoom = null;
         hideVoiceDock();
         showScreen('landing-page');
         if (removed) showToast('The host removed you from the lobby.', 3500);
         else if (roomDeleted) showToast('The room was closed by the host.', 3500);
       }
+    },
+    onPresence: ({ room }) => {
+      if (runtime !== candidate) return;
+      presenceRoom = room;
+      syncSeatPresence();
     },
   };
 
@@ -601,7 +546,7 @@ async function buildRuntime(gameId) {
         ...commonCallbacks,
         onConnected: ({ roomCode }) => { element('lobby-room-code').textContent = roomCode; },
         onLobby: renderPPPLobby,
-        onState: (state) => { if (state.status === 'playing') showScreen('ppp-gameplay'); },
+        onState: (state) => { if (state.status === 'playing') showScreen('ppp-gameplay'); syncSeatPresence(); },
       },
     });
     return candidate;
@@ -625,7 +570,7 @@ async function buildRuntime(gameId) {
         ...commonCallbacks,
         onConnected: ({ roomCode }) => { element('fm-lobby-room-code').textContent = roomCode; },
         onLobby: renderFMLobby,
-        onState: (state) => { if (state.status === 'playing') showScreen('fm-gameplay'); },
+        onState: (state) => { if (state.status === 'playing') showScreen('fm-gameplay'); syncSeatPresence(); },
       },
     });
     return candidate;
@@ -650,7 +595,7 @@ async function buildRuntime(gameId) {
         ...commonCallbacks,
         onConnected: ({ roomCode }) => { element('sr-lobby-room-code').textContent = roomCode; },
         onLobby: renderSRLobby,
-        onState: (state) => { if (state.status === 'playing') showScreen('sr-gameplay'); },
+        onState: (state) => { if (state.status === 'playing') showScreen('sr-gameplay'); syncSeatPresence(); },
       },
     });
     return candidate;
@@ -675,7 +620,7 @@ async function buildRuntime(gameId) {
         ...commonCallbacks,
         onConnected: ({ roomCode }) => { element('pt-lobby-room-code').textContent = roomCode; },
         onLobby: renderPTLobby,
-        onState: (state) => { if (state.status === 'playing') showScreen('pt-gameplay'); },
+        onState: (state) => { if (state.status === 'playing') showScreen('pt-gameplay'); syncSeatPresence(); },
       },
     });
     return candidate;
@@ -703,7 +648,7 @@ async function buildRuntime(gameId) {
         },
         onConnected: ({ roomCode }) => { element('pk-lobby-room-code').textContent = roomCode; },
         onLobby: renderPKLobby,
-        onState: (state) => { if (state.status === 'betting') showScreen('pk-gameplay'); },
+        onState: (state) => { if (state.status === 'betting') showScreen('pk-gameplay'); syncSeatPresence(); },
       },
     });
     return candidate;
@@ -735,7 +680,7 @@ async function buildRuntime(gameId) {
         },
         onConnected: ({ roomCode }) => { element('bl-lobby-room-code').textContent = roomCode; },
         onLobby: renderBLLobby,
-        onState: (state) => { if (state.status === 'playing') showScreen('bl-gameplay'); },
+        onState: (state) => { if (state.status === 'playing') showScreen('bl-gameplay'); syncSeatPresence(); },
       },
     });
     return candidate;
@@ -824,6 +769,14 @@ async function leaveCurrentRoom() {
   showScreen('landing-page');
 }
 
+/** Standard How-to-Play screen per game: `<p>-btn-how-to` opens `<p>-how-to`, back returns to `<p>-online-choice`. */
+function wireHowToScreens() {
+  for (const prefix of ['ppp', 'fm', 'sr', 'pt', 'pk', 'bl']) {
+    element(`${prefix}-btn-how-to`).addEventListener('click', () => showScreen(`${prefix}-how-to`));
+    element(`${prefix}-btn-back-how-to`).addEventListener('click', () => showScreen(`${prefix}-online-choice`));
+  }
+}
+
 function wirePPP() {
   wireLobbyRemoval('lobby-player-list', 'patte-par-patta');
   element('btn-create-room').addEventListener('click', () => showScreen('ppp-create-room'));
@@ -857,7 +810,7 @@ function wirePPP() {
     const result = await runtime.throwCard(Number(card.dataset.handIndex || 0));
     if (result && !result.ok && result.reason === 'busy') showToast('Finishing the current animation…');
   });
-  element('btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.isHost && runtime.playAgain()));
+  element('btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
   element('btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Patte Par Patta', 'patte-par-patta')();
@@ -892,7 +845,7 @@ function wireFlipAndMatch() {
   }));
   element('fm-btn-start-online').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.startRound()));
   element('fm-btn-leave-lobby').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
-  element('fm-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.isHost && runtime.playAgain()));
+  element('fm-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
   element('fm-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('fm-btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Flip & Match', 'flip-and-match')();
@@ -931,7 +884,7 @@ function wireSimpleRummy() {
   element('sr-gameplay').addEventListener('click', (event) => {
     if (activeGameId === 'simple-rummy' && event.target.closest('[data-draw-source], [data-hand-index]')) warmSpeech();
   });
-  element('sr-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.isHost && runtime.playAgain()));
+  element('sr-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
   element('sr-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('sr-btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Simple Rummy', 'simple-rummy')();
@@ -970,7 +923,7 @@ function wirePerfectTen() {
   element('pt-gameplay').addEventListener('click', (event) => {
     if (activeGameId === 'perfect-ten' && event.target.closest('[data-draw-source], [data-hand-index]')) warmSpeech();
   });
-  element('pt-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.isHost && runtime.playAgain()));
+  element('pt-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
   element('pt-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('pt-btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Perfect Ten', 'perfect-ten')();
@@ -1006,7 +959,7 @@ function wirePoker() {
   }));
   element('pk-btn-start-online').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.startRound()));
   element('pk-btn-leave-lobby').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
-  element('pk-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.isHost && runtime.playAgain()));
+  element('pk-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
   element('pk-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('pk-btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Poker', 'poker')();
@@ -1042,7 +995,7 @@ function wireBluff() {
   }));
   element('bl-btn-start-online').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.startRound()));
   element('bl-btn-leave-lobby').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
-  element('bl-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.isHost && runtime.playAgain()));
+  element('bl-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
   element('bl-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('bl-btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Bluff', 'bluff')();
@@ -1078,10 +1031,11 @@ async function waitForRuntimeIdle() {
 
 async function setupServiceWorkerUpdates() {
   if (!import.meta.env.PROD) return;
-  const toast = element('update-toast');
-  const message = element('update-message');
-  const updateButton = element('update-now');
-  const laterButton = element('update-later');
+  // Standard toast ids (shared across every game in the platform).
+  const toast = element('updateToast');
+  const message = element('update-toast-message');
+  const updateButton = element('btn-update-reload');
+  const laterButton = element('btn-update-later');
   let applyWaitingUpdate = null;
   let applying = false;
 
@@ -1122,8 +1076,8 @@ async function setupServiceWorkerUpdates() {
       toast.setAttribute('aria-busy', 'false');
       updateButton.disabled = false;
       laterButton.disabled = false;
-      updateButton.textContent = 'Update';
-      message.textContent = 'A new version is available.';
+      updateButton.textContent = 'Reload Now';
+      message.textContent = 'Reload to get the latest version.';
     },
   });
 }
@@ -1242,6 +1196,7 @@ async function bootstrap() {
   wirePerfectTen();
   wirePoker();
   wireBluff();
+  wireHowToScreens();
   renderLandingPage(AVAILABLE_GAMES, (gameId) => {
     if (gameId === 'patte-par-patta') showScreen('ppp-online-choice');
     if (gameId === 'flip-and-match') showScreen('fm-online-choice');
@@ -1251,7 +1206,6 @@ async function bootstrap() {
     if (gameId === 'bluff') showScreen('bl-online-choice');
   });
   showScreen('landing-page');
-  setupDiagnosticsGesture();
   setupServiceWorkerUpdates().catch((error) => console.warn('[CardGamesMP] Service worker unavailable:', error));
 
   const params = new URLSearchParams(location.search);

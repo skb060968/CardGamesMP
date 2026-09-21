@@ -141,7 +141,10 @@ body {
   transition: transform 0.15s, box-shadow 0.15s, border-color 0.2s;
 }
 
-.game-card:hover { transform: translateY(-2px); }
+/* Hover only on real-pointer devices — touch :hover sticks to the last tap. */
+@media (hover: hover) and (pointer: fine) {
+  .game-card:hover { transform: translateY(-2px); }
+}
 .game-card:active { transform: translateY(0); }
 
 .game-card.selected {
@@ -743,8 +746,10 @@ body {
 .player-list {
   list-style: none;
   width: 100%;
-  max-width: 360px;
-  background: var(--color-panel-bg);
+  max-width: 380px;
+  background: rgba(30, 14, 4, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   border-radius: 14px;
   padding: 14px;
   display: flex;
@@ -792,9 +797,11 @@ body {
   line-height: 1;
 }
 
-.remove-player-btn:hover {
-  background: rgba(255, 40, 40, 1);
-  transform: scale(1.1);
+@media (hover: hover) and (pointer: fine) {
+  .remove-player-btn:hover {
+    background: rgba(255, 40, 40, 1);
+    transform: scale(1.1);
+  }
 }
 
 .remove-player-btn:active {
@@ -3218,4 +3225,86 @@ body {
   border-radius: 6px;
   padding: 2px 6px;
   margin-left: 6px;
+}
+
+/* =========================================================
+   HOW TO PLAY (STANDARD — one screen per game)
+   ========================================================= */
+.how-to-list {
+  list-style: none;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  margin: 0 0 6px;
+}
+.how-to-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 12px 14px;
+  text-align: left;
+}
+.how-to-icon { font-size: 1.5rem; line-height: 1.1; flex-shrink: 0; }
+.how-to-item p { font-size: 0.9rem; line-height: 1.4; color: #fff; }
+.how-to-item strong { color: #ffe08a; }
+
+/* =========================================================
+   CENTERED CARD (STANDARD — every game)
+   Pre-game screens float as a glass card in the middle of the
+   viewport; gameplay screens keep the top-anchored flow.
+   ========================================================= */
+.app:not(:has([id$="-gameplay"]:not([hidden]))) { justify-content: center; }
+
+#ppp-online-choice, #ppp-how-to, #ppp-create-room, #ppp-join-room, #ppp-lobby,
+#fm-online-choice,  #fm-how-to,  #fm-create-room,  #fm-join-room,  #fm-lobby,
+#sr-online-choice,  #sr-how-to,  #sr-create-room,  #sr-join-room,  #sr-lobby,
+#pt-online-choice,  #pt-how-to,  #pt-create-room,  #pt-join-room,  #pt-lobby,
+#pk-online-choice,  #pk-how-to,  #pk-create-room,  #pk-join-room,  #pk-lobby,
+#bl-online-choice,  #bl-how-to,  #bl-create-room,  #bl-join-room,  #bl-lobby {
+  width: min(100%, 400px);
+  gap: 12px;
+  padding: clamp(14px, 4vw, 24px);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: clamp(18px, 4vw, 24px);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+/* Every gameplay screen fills the viewport so the board never floats mid-screen. */
+#ppp-gameplay, #fm-gameplay, #sr-gameplay, #pt-gameplay, #pk-gameplay, #bl-gameplay {
+  min-height: 100svh;
+}
+
+/* =========================================================
+   DENSE LOBBY (STANDARD — kicks in at 5+ seats; harmless at 4)
+   ========================================================= */
+.player-list:has(li:nth-child(5)) {
+  gap: 5px; padding: 10px;
+  max-height: min(42svh, 360px); overflow-y: auto; overscroll-behavior: contain;
+}
+.player-list:has(li:nth-child(5)) li { padding: 6px 10px; gap: 6px; font-size: 0.92rem; }
+.player-list:has(li:nth-child(5)) .remove-player-btn { width: 24px; height: 24px; font-size: 14px; }
+
+/* =========================================================
+   IN-GAME PRESENCE (STANDARD) — a seat whose player has dropped
+   mid-round is greyed and tagged OFF (see main.js syncSeatPresence).
+   ========================================================= */
+[id$="-gameplay"] .seat-offline {
+  opacity: 0.55;
+  filter: grayscale(0.6);
+  transition: opacity 0.25s, filter 0.25s;
+}
+[id$="-gameplay"] .seat-offline > .offline-badge {
+  margin-left: 0;
+  margin-top: 2px;
+  font-size: 0.56rem;
+  padding: 1px 5px;
 }

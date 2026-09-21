@@ -1,9 +1,22 @@
+/* CardGamesMP service worker — deliberate updates, safe fallbacks.
+ * BUMP CACHE_VERSION on every deploy so clients get the update prompt. */
 const CACHE_PREFIX = 'cardgamesmp-app-';
-const CACHE_VERSION = 'v55';
+const CACHE_VERSION = 'v57';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 
+// App shell + small static media. Hashed Vite bundles are picked up on first
+// use by the runtime caching below, so they are not listed here.
+const STATIC_ASSETS = [
+  '/', '/index.html', '/manifest.json',
+  '/icons/icon-192.png', '/icons/icon-512.png',
+  '/sounds/throw.mp3', '/sounds/capture.mp3',
+];
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.add('/')));
+  // allSettled: one missing asset must never block the whole install.
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) =>
+    Promise.allSettled(STATIC_ASSETS.map((asset) => cache.add(asset)))
+  ));
 });
 
 self.addEventListener('message', (event) => {
@@ -41,7 +54,7 @@ async function networkFirst(request, navigation = false) {
     const cached = await caches.match(request);
     if (cached) return cached;
     if (navigation) {
-      const shell = await caches.match('/');
+      const shell = (await caches.match('/')) || (await caches.match('/index.html'));
       if (shell) return shell;
     }
     return new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } });

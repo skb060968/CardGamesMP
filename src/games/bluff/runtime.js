@@ -3,7 +3,7 @@ import { ref as firebaseRef, runTransaction as firebaseRunTransaction } from 'fi
 
 import { firebaseArray } from '../../core/firebase-array.js';
 import { generateRoomCode, normalizeRoomCode } from '../../core/room-code.js';
-import { createFirebaseRoomStore } from '../../data/firebase-room-store.js';
+import { createFirebaseRoomStore, isPlayerConnected } from '../../data/firebase-room-store.js';
 import { createGameSessionStore } from '../../platform/session-storage.js';
 import { createBluffAction } from './bluff-action.js';
 import { createBluffTransitionValidator } from './bluff-transition.js';
@@ -75,6 +75,11 @@ function sortedPlayers(room) {
     .sort(([left], [right]) => Number(left.slice(7)) - Number(right.slice(7)));
 }
 
+/** Drop-at-start (standard): only seats that are connected right now are dealt in. */
+function connectedPlayers(room) {
+  return sortedPlayers(room).filter(([, player]) => isPlayerConnected(room, player.uid));
+}
+
 export function createBluffRuntime({
   database,
   uid,
@@ -103,6 +108,7 @@ export function createBluffRuntime({
   let host = false;
   let unsubscribeRoom = null;
   let stopPresence = null;
+  let stopReconnectWatch = null;
   let disposed = false;
   let reconcileChain = Promise.resolve();
   let rosterRefreshQueued = false;
@@ -389,6 +395,7 @@ export function createBluffRuntime({
 
   async function disconnectLocal({ suppressErrors = false } = {}) {
     if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
+    if (stopReconnectWatch) { stopReconnectWatch(); stopReconnectWatch = null; }
     if (stopPresence) {
       const stop = stopPresence;
       stopPresence = null;
@@ -416,7 +423,10 @@ export function createBluffRuntime({
     updateIdentity(room);
     if (room.meta?.status === 'active' && room.game) {
       const incoming = room.game;
-      if (!forceSnapshot && state && incoming.revision <= state.revision) return;
+      if (!forceSnapshot && state && incoming.revision <= state.revision) {
+        callbacks.onPresence?.({ room, state });
+        return;
+      }
       const exactlyNext = state && incoming.revision === state.revision + 1;
       if (!forceSnapshot && move?.id && exactlyNext) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
@@ -429,6 +439,7 @@ export function createBluffRuntime({
           });
         }
       }
+      callbacks.onPresence?.({ room, state });
       return;
     }
     state = room.game;
@@ -448,16 +459,19 @@ export function createBluffRuntime({
       onMove: (move) => enqueue(() => refreshRoom(move?.id ? move : null)),
       onStatus: () => enqueue(() => refreshRoom()),
       onReset: () => enqueue(() => refreshRoom(null, { forceSnapshot: true })),
+      onPresence: () => enqueue(() => refreshRoom()),
       onPlayer: queueRosterRefresh,
       onError: reportError,
     });
     stopPresence = store.startPresence({ playerIndex: roomSlotIndex, onError: reportError });
+    stopReconnectWatch = store.watchReconnect(() => enqueue(() => refreshRoom(null, { forceSnapshot: true })));
     callbacks.onConnected?.({
       roomCode: store.roomCode, roomSlotIndex, gamePlayerIndex, isHost: host, room,
     });
     if (room.meta?.status === 'active') {
       await renderState({ state });
       callbacks.onState?.(state, { remote: true, restored: true });
+      callbacks.onPresence?.({ room, state });
     } else callbacks.onLobby?.({ room, roomCode: store.roomCode, isHost: host, roomSlotIndex });
     return { roomCode: store.roomCode, roomSlotIndex, gamePlayerIndex, isHost: host, room };
   }
@@ -500,15 +514,16 @@ export function createBluffRuntime({
     ensureConnected();
     const room = await store.readRoom();
     if (room.meta?.hostUid !== uid) throw new Error('Only the host can start a round');
-    const entries = sortedPlayers(room).slice(0, MAX_PLAYERS);
-    if (entries.length < 2 || entries.length > MAX_PLAYERS) throw new Error('Bluff requires 2-4 players');
+    const entries = connectedPlayers(room).slice(0, MAX_PLAYERS);
+    if (entries.length < 2 || entries.length > MAX_PLAYERS) throw new Error('Bluff requires 2-4 connected players');
     const infos = entries.map(([slot, player]) => ({
       name: player.name, emoji: player.emoji, slotId: slot,
     }));
     const nextState = rules.createGame(infos, options.seed == null ? undefined : { seed: options.seed });
     const validation = rules.validateState(nextState);
     if (!validation?.valid) throw new Error(validation?.error || 'Invalid initial Bluff state');
-    const roster = Object.fromEntries(entries.map(([slot, player]) => [slot, player.uid]));
+    // Roster guard covers every seat; offline seats stay seated and sit the round out.
+    const roster = Object.fromEntries(sortedPlayers(room).map(([slot, player]) => [slot, player.uid]));
     const updated = await store.resetRoom({
       state: nextState, status: 'active', expectedRoster: roster,
     });
@@ -516,15 +531,21 @@ export function createBluffRuntime({
     updateIdentity(updated);
     await renderState({ state });
     callbacks.onState?.(state, { remote: false, newRound: true });
+    callbacks.onPresence?.({ room: updated, state });
     return state;
   }
   async function startRound(options = {}) { return launchRound(options); }
-  async function playAgain(options = {}) {
+  /** Play Again (standard): host sends everyone back to the lobby; latecomers can join. */
+  async function playAgain() {
     ensureConnected();
     const room = await store.readRoom();
     if (room.meta?.hostUid !== uid) throw new Error('Only the host can start another round');
     if (room.game?.status !== 'finished') throw new Error('The current round is not finished');
-    return launchRound(options);
+    const updated = await store.resetRoom({ state: waitingState(), status: 'waiting' });
+    state = updated.game;
+    updateIdentity(updated);
+    callbacks.onLobby?.({ room: updated, roomCode: store.roomCode, isHost: host, roomSlotIndex });
+    return updated;
   }
   async function removeLobbyPlayer({ playerIndex, expectedUid }) {
     ensureConnected();

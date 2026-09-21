@@ -3,8 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="description" content="Hardened multiplayer card games platform">
+  <!-- LINK PREVIEW: edit description + keep og:/twitter: in sync. The absolute URLs
+       are this platform's production domain, hard-coded on purpose (no env var to
+       configure). Preview scrapers cache hard — a shared link may show the old card until re-fetched. -->
+  <meta name="description" content="Six multiplayer card games in one app — Patte Par Patta, Flip & Match, Simple Rummy, Perfect Ten, Poker and Bluff · 2–4 players.">
   <meta name="theme-color" content="#4b2a12">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Card Games MP">
+  <meta property="og:title" content="Card Games MP">
+  <meta property="og:description" content="Six multiplayer card games in one app — Patte Par Patta, Flip & Match, Simple Rummy, Perfect Ten, Poker and Bluff · 2–4 players.">
+  <meta property="og:url" content="https://card-games-mp.vercel.app/">
+  <meta property="og:image" content="https://card-games-mp.vercel.app/icons/icon-512.png">
+
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Card Games MP">
+  <meta name="twitter:description" content="Six multiplayer card games in one app — Patte Par Patta, Flip & Match, Simple Rummy, Perfect Ten, Poker and Bluff · 2–4 players.">
+  <meta name="twitter:image" content="https://card-games-mp.vercel.app/icons/icon-512.png">
+
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" sizes="192x192" href="/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -25,7 +41,19 @@
       <h2 class="setup-heading">Patte Par Patta</h2>
       <button id="btn-create-room" class="btn primary" type="button">🏠 Create Room</button>
       <button id="btn-join-room" class="btn secondary" type="button">🚪 Join Room</button>
+      <button id="ppp-btn-how-to" class="btn secondary" type="button">📖 How to Play</button>
       <button id="btn-back-online" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="ppp-how-to" class="screen" hidden aria-label="How to play Patte Par Patta">
+      <h2 class="setup-heading">How to Play</h2>
+      <ol class="how-to-list">
+        <li class="how-to-item"><span class="how-to-icon">🎯</span><p><strong>Create or join a room</strong> with a 4-letter code and pick an avatar — 2 to 4 players. The host can choose one deck or two.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🃏</span><p><strong>Cards are dealt evenly.</strong> On your turn, tap a card in your hand to throw it face-up onto the pile.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">⚡</span><p><strong>Match the rank</strong> of the card on top of the pile and you capture the whole pile into your hand.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🏆</span><p><strong>Run out of cards and you're out.</strong> The last player still holding cards wins.</p></li>
+      </ol>
+      <button id="ppp-btn-back-how-to" class="btn secondary back-btn" type="button">← Back</button>
     </section>
 
     <section id="ppp-create-room" class="screen" hidden aria-label="Create a room">
@@ -120,7 +148,19 @@
       <h2 class="setup-heading">Flip & Match</h2>
       <button id="fm-btn-create-room" class="btn primary" type="button">🏠 Create Room</button>
       <button id="fm-btn-join-room" class="btn secondary" type="button">🚪 Join Room</button>
+      <button id="fm-btn-how-to" class="btn secondary" type="button">📖 How to Play</button>
       <button id="fm-btn-back-online" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="fm-how-to" class="screen" hidden aria-label="How to play Flip &amp; Match">
+      <h2 class="setup-heading">How to Play</h2>
+      <ol class="how-to-list">
+        <li class="how-to-item"><span class="how-to-icon">🎯</span><p><strong>Create or join a room</strong> with a 4-letter code and pick an avatar — 2 to 4 players. All 52 cards are laid out face-down.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">👆</span><p><strong>On your turn, flip one card</strong> face-up.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">⚡</span><p><strong>If its rank matches any face-up card</strong> on the table, take both cards — and keep your turn. No match? Play passes on.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🏆</span><p><strong>When the table is empty,</strong> the player with the most cards wins. Equal counts share the win.</p></li>
+      </ol>
+      <button id="fm-btn-back-how-to" class="btn secondary back-btn" type="button">← Back</button>
     </section>
 
     <section id="fm-create-room" class="screen" hidden aria-label="Create a Flip & Match room">
@@ -196,7 +236,19 @@
       <h2 class="setup-heading">Simple Rummy</h2>
       <button id="sr-btn-create-room" class="btn primary" type="button">🏠 Create Room</button>
       <button id="sr-btn-join-room" class="btn secondary" type="button">🚪 Join Room</button>
+      <button id="sr-btn-how-to" class="btn secondary" type="button">📖 How to Play</button>
       <button id="sr-btn-back-online" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="sr-how-to" class="screen" hidden aria-label="How to play Simple Rummy">
+      <h2 class="setup-heading">How to Play</h2>
+      <ol class="how-to-list">
+        <li class="how-to-item"><span class="how-to-icon">🎯</span><p><strong>Create or join a room</strong> with a 4-letter code and pick an avatar — 2 to 4 players. Everyone gets 10 cards (two decks when 4 play).</p></li>
+        <li class="how-to-item"><span class="how-to-icon">👆</span><p><strong>On your turn, draw one card</strong> from the stock or the discard pile, then discard one card from your hand.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🧩</span><p><strong>Build sets and sequences.</strong> A set is 3–4 cards of the same rank in different suits. A sequence is 3 or more cards of the same suit in a row — Ace can sit low (A-2-3) or high (Q-K-A).</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🏆</span><p><strong>Arrange all 10 cards</strong> into sets and sequences and you win the round.</p></li>
+      </ol>
+      <button id="sr-btn-back-how-to" class="btn secondary back-btn" type="button">← Back</button>
     </section>
 
     <section id="sr-create-room" class="screen" hidden aria-label="Create a Simple Rummy room">
@@ -287,7 +339,19 @@
       <h2 class="setup-heading">Perfect Ten</h2>
       <button id="pt-btn-create-room" class="btn primary" type="button">🏠 Create Room</button>
       <button id="pt-btn-join-room" class="btn secondary" type="button">🚪 Join Room</button>
+      <button id="pt-btn-how-to" class="btn secondary" type="button">📖 How to Play</button>
       <button id="pt-btn-back-online" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="pt-how-to" class="screen" hidden aria-label="How to play Perfect Ten">
+      <h2 class="setup-heading">How to Play</h2>
+      <ol class="how-to-list">
+        <li class="how-to-item"><span class="how-to-icon">🎯</span><p><strong>Create or join a room</strong> with a 4-letter code and pick an avatar — 2 to 4 players. Everyone gets 10 cards.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">👆</span><p><strong>On your turn, draw one card</strong> from the stock or the discard pile, then discard one card from your hand.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🔟</span><p><strong>Collect one card of every rank from Ace to 10</strong> — suits don't matter. Jacks, Queens and Kings never count, so discard them as soon as you can.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🏆</span><p><strong>First to hold A through 10</strong> wins the round.</p></li>
+      </ol>
+      <button id="pt-btn-back-how-to" class="btn secondary back-btn" type="button">← Back</button>
     </section>
 
     <section id="pt-create-room" class="screen" hidden aria-label="Create a Perfect Ten room">
@@ -376,7 +440,19 @@
       <h2 class="setup-heading">Poker</h2>
       <button id="pk-btn-create-room" class="btn primary" type="button">🏠 Create Room</button>
       <button id="pk-btn-join-room" class="btn secondary" type="button">🚪 Join Room</button>
+      <button id="pk-btn-how-to" class="btn secondary" type="button">📖 How to Play</button>
       <button id="pk-btn-back-online" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="pk-how-to" class="screen" hidden aria-label="How to play Poker">
+      <h2 class="setup-heading">How to Play</h2>
+      <ol class="how-to-list">
+        <li class="how-to-item"><span class="how-to-icon">🎯</span><p><strong>Create or join a room</strong> with a 4-letter code and pick an avatar — 2 to 4 players. Everyone starts with 200 chips and is dealt 3 cards.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">💰</span><p><strong>On your turn choose:</strong> Bet 10, Call, Raise +10, Fold, or Show to compare hands and end the round.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🃏</span><p><strong>Hand ranks, best first:</strong> Trail (three of a kind) › Pure Sequence (same suit, in a row) › Sequence › Colour (same suit) › Pair › High Card.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🏆</span><p><strong>Best hand takes the pot</strong> — or outlast everyone who folds. Drop below 10 chips and you sit out.</p></li>
+      </ol>
+      <button id="pk-btn-back-how-to" class="btn secondary back-btn" type="button">← Back</button>
     </section>
 
     <section id="pk-create-room" class="screen" hidden aria-label="Create a Poker room">
@@ -455,7 +531,19 @@
       <h2 class="setup-heading">Bluff</h2>
       <button id="bl-btn-create-room" class="btn primary" type="button">🏠 Create Room</button>
       <button id="bl-btn-join-room" class="btn secondary" type="button">🚪 Join Room</button>
+      <button id="bl-btn-how-to" class="btn secondary" type="button">📖 How to Play</button>
       <button id="bl-btn-back-online" class="btn secondary back-btn" type="button">← Back</button>
+    </section>
+
+    <section id="bl-how-to" class="screen" hidden aria-label="How to play Bluff">
+      <h2 class="setup-heading">How to Play</h2>
+      <ol class="how-to-list">
+        <li class="how-to-item"><span class="how-to-icon">🎯</span><p><strong>Create or join a room</strong> with a 4-letter code and pick an avatar — 2 to 4 players. Cards are dealt evenly.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🎭</span><p><strong>On your turn, place 1–4 cards face-down</strong> and declare a rank. The first placer sets the rank for the round; everyone after must claim that same rank — truthfully or not. Nothing to play? Pass.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🚨</span><p><strong>Suspicious? Tap BLUFF!</strong> If the last placer lied, they pick up the whole pile. If they were honest, you take it instead.</p></li>
+        <li class="how-to-item"><span class="how-to-icon">🏆</span><p><strong>Place your last cards without being caught</strong> and you win.</p></li>
+      </ol>
+      <button id="bl-btn-back-how-to" class="btn secondary back-btn" type="button">← Back</button>
     </section>
 
     <section id="bl-create-room" class="screen" hidden aria-label="Create a Bluff room">
@@ -541,9 +629,14 @@
     <div id="voice-widget"></div>
   </div>
 
-  <aside id="update-toast" class="update-toast" hidden role="status" aria-live="polite" aria-busy="false">
-    <p id="update-message">A new version is available.</p>
-    <div class="update-actions"><button id="update-now" class="btn primary" type="button">Update</button><button id="update-later" class="btn secondary" type="button">Later</button></div>
+  <!-- Update toast (standard ids shared by every game) -->
+  <aside id="updateToast" class="update-toast" hidden role="status" aria-live="polite" aria-busy="false">
+    <div class="update-toast-title">🎉 New update available</div>
+    <p id="update-toast-message" class="update-toast-message">Reload to get the latest version.</p>
+    <div class="update-toast-actions">
+      <button id="btn-update-reload" class="btn primary" type="button">Reload Now</button>
+      <button id="btn-update-later" class="btn secondary" type="button">Later</button>
+    </div>
   </aside>
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
   <script type="module" src="/src/main.js"></script>

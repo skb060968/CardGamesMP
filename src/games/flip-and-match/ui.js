@@ -60,6 +60,7 @@ function renderOpponentBlocks(container, players, currentPlayerIndex, localPlaye
 
     const block = document.createElement('div');
     block.className = 'fm-player-block';
+    block.dataset.playerIndex = String(i);
     if (i === currentPlayerIndex) block.classList.add('fm-active-turn');
 
     // Emoji

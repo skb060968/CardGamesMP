@@ -602,6 +602,30 @@ export function createFirebaseRoomStore({
     };
   }
 
+  /**
+   * Standard reconnect hook: fires `onRestore` once each time the RTDB socket
+   * comes back after having been down. The first `.info/connected` emission is
+   * the baseline and never fires. Returns an unsubscribe function.
+   */
+  function watchReconnect(onRestore) {
+    requireFunction(onRestore, 'onRestore');
+    let wasOffline = false;
+    let stopped = false;
+    const connectedReference = makeRef(database, '.info/connected');
+    const unsubscribe = listenValue(connectedReference, (snapshot) => {
+      if (stopped) return;
+      if (snapshot.val() !== true) { wasOffline = true; return; }
+      if (!wasOffline) return;
+      wasOffline = false;
+      try { onRestore(); } catch (_) { /* the caller owns its own error reporting */ }
+    }, () => {});
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }
+
   async function leaveRoom({ playerIndex } = {}) {
     if (playerIndex !== undefined && (!Number.isInteger(playerIndex) || playerIndex < 0 || playerIndex >= SLOT_COUNT)) {
       throw new TypeError('playerIndex must be an integer from 0 through 5');
@@ -767,11 +791,15 @@ export function createFirebaseRoomStore({
             return undefined;
           }
         }
+        // Presence is deliberately left untouched: each connection's entry is
+        // owned by that client's onDisconnect handler, and nobody re-writes it
+        // after a reset (the `.info/connected` listener only fires on a real
+        // reconnect). Wiping it here made every seat read as "connected" for
+        // the rest of the round.
         return {
           ...currentRoom,
           game: encodedState,
           lastMove: null,
-          presence: {},
           meta: {
             ...currentRoom.meta,
             status,
@@ -1683,6 +1711,7 @@ export function createFirebaseRoomStore({
     readRoom,
     subscribeRoom,
     startPresence,
+    watchReconnect,
     leaveRoom,
     removePlayer,
     deleteRoom,

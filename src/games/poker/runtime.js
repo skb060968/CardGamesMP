@@ -1,7 +1,7 @@
 import { createActionCoordinator } from '../../core/action-coordinator.js';
 import { firebaseArray } from '../../core/firebase-array.js';
 import { generateRoomCode, normalizeRoomCode } from '../../core/room-code.js';
-import { createFirebaseRoomStore } from '../../data/firebase-room-store.js';
+import { createFirebaseRoomStore, isPlayerConnected } from '../../data/firebase-room-store.js';
 import { createGameSessionStore } from '../../platform/session-storage.js';
 import { createPokerAction } from './poker-action.js';
 import { createPokerTransitionValidator } from './poker-transition.js';
@@ -55,6 +55,11 @@ function sortedPlayers(room) {
     .sort(([left], [right]) => Number(left.slice(7)) - Number(right.slice(7)));
 }
 
+/** Drop-at-start (standard): only seats that are connected right now are dealt in. */
+function connectedPlayers(room) {
+  return sortedPlayers(room).filter(([, player]) => isPlayerConnected(room, player.uid));
+}
+
 export function createPokerRuntime({
   database,
   uid,
@@ -83,6 +88,7 @@ export function createPokerRuntime({
   let host = false;
   let unsubscribeRoom = null;
   let stopPresence = null;
+  let stopReconnectWatch = null;
   let disposed = false;
   let reconcileChain = Promise.resolve();
   let rosterRefreshQueued = false;
@@ -207,6 +213,7 @@ export function createPokerRuntime({
 
   async function disconnectLocal({ suppressErrors = false } = {}) {
     if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
+    if (stopReconnectWatch) { stopReconnectWatch(); stopReconnectWatch = null; }
     if (stopPresence) {
       const stop = stopPresence;
       stopPresence = null;
@@ -239,7 +246,10 @@ export function createPokerRuntime({
     updateIdentity(room);
     if (room.meta?.status === 'active' && room.game) {
       const incoming = room.game;
-      if (!forceSnapshot && state && incoming.revision <= state.revision) return;
+      if (!forceSnapshot && state && incoming.revision <= state.revision) {
+        callbacks.onPresence?.({ room, state });
+        return;
+      }
       const exactlyNext = state && incoming.revision === state.revision + 1;
       if (!forceSnapshot && move?.id && exactlyNext) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
@@ -252,6 +262,7 @@ export function createPokerRuntime({
           });
         }
       }
+      callbacks.onPresence?.({ room, state });
       return;
     }
     state = room.game;
@@ -271,16 +282,19 @@ export function createPokerRuntime({
       onMove: (move) => enqueue(() => refreshRoom(move?.id ? move : null)),
       onStatus: () => enqueue(() => refreshRoom()),
       onReset: () => enqueue(() => refreshRoom(null, { forceSnapshot: true })),
+      onPresence: () => enqueue(() => refreshRoom()),
       onPlayer: queueRosterRefresh,
       onError: reportError,
     });
     stopPresence = store.startPresence({ playerIndex: roomSlotIndex, onError: reportError });
+    stopReconnectWatch = store.watchReconnect(() => enqueue(() => refreshRoom(null, { forceSnapshot: true })));
     callbacks.onConnected?.({
       roomCode: store.roomCode, roomSlotIndex, gamePlayerIndex, isHost: host, room,
     });
     if (room.meta?.status === 'active') {
       await renderState({ state });
       callbacks.onState?.(state, { remote: true, restored: true });
+      callbacks.onPresence?.({ room, state });
     } else {
       callbacks.onLobby?.({ room, roomCode: store.roomCode, isHost: host, roomSlotIndex });
     }
@@ -344,15 +358,18 @@ export function createPokerRuntime({
     ensureConnected();
     const room = await store.readRoom();
     if (room.meta?.hostUid !== uid) throw new Error('Only the host can start a round');
-    const entries = sortedPlayers(room).slice(0, MAX_PLAYERS);
-    if (entries.length < 2) throw new Error('At least two players are required');
+    const entries = connectedPlayers(room).slice(0, MAX_PLAYERS);
+    if (entries.length < 2) throw new Error('At least two connected players are required');
     const infos = entries.map(([slot, player]) => ({
       name: player.name,
       emoji: player.emoji,
       slotId: slot,
     }));
+    // Chips carried across rounds live on the waiting state (see returnToLobby)
+    // so they survive the trip through the lobby; an explicit carry wins.
+    const stashed = room.game?.status === 'waiting' ? room.game.carriedChips : undefined;
     const baseState = rules.createGame(infos, {
-      existingChips: carriedChips(entries, carryInput),
+      existingChips: carriedChips(entries, carryInput ?? stashed),
       seed: options.seed,
     });
     const playerSlots = entries.map(([slot]) => slot);
@@ -367,7 +384,8 @@ export function createPokerRuntime({
     };
     const validation = rules.validateState(nextState);
     if (!validation?.valid) throw new Error(validation?.error || 'Invalid initial Poker state');
-    const roster = Object.fromEntries(entries.map(([slot, player]) => [slot, player.uid]));
+    // Roster guard covers every seat; offline seats stay seated and sit the round out.
+    const roster = Object.fromEntries(sortedPlayers(room).map(([slot, player]) => [slot, player.uid]));
     const updated = await store.resetRoom({
       state: nextState,
       status: 'active',
@@ -377,6 +395,7 @@ export function createPokerRuntime({
     updateIdentity(updated);
     await renderState({ state });
     callbacks.onState?.(state, { remote: false, newRound: true });
+    callbacks.onPresence?.({ room: updated, state });
     return state;
   }
 
@@ -387,7 +406,12 @@ export function createPokerRuntime({
     );
   }
 
-  async function playAgain(options = {}) {
+  /**
+   * Play Again (standard): host sends everyone back to the lobby; latecomers
+   * can join. Chip balances are stashed on the waiting state so the next Start
+   * carries them over (new joiners get the default stack).
+   */
+  async function playAgain() {
     ensureConnected();
     const room = await store.readRoom();
     if (room.meta?.hostUid !== uid) throw new Error('Only the host can start another round');
@@ -397,7 +421,13 @@ export function createPokerRuntime({
       const chips = room.game.players?.[index]?.chips;
       if (typeof slot === 'string' && Number.isSafeInteger(chips) && chips >= 0) balances[slot] = chips;
     });
-    return launchRound(options, balances);
+    const nextState = { ...waitingState() };
+    if (Object.keys(balances).length) nextState.carriedChips = balances;
+    const updated = await store.resetRoom({ state: nextState, status: 'waiting' });
+    state = updated.game;
+    updateIdentity(updated);
+    callbacks.onLobby?.({ room: updated, roomCode: store.roomCode, isHost: host, roomSlotIndex });
+    return updated;
   }
 
   async function removeLobbyPlayer({ playerIndex, expectedUid }) {

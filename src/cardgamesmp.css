@@ -12,12 +12,13 @@
   box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.35);
 }
 
-.update-toast[hidden] { display: none; }
-.update-toast p { margin: 0 0 0.75rem; line-height: 1.4; }
-.update-actions { display: flex; gap: 0.6rem; justify-content: flex-end; }
-.update-actions .btn { width: auto; min-width: 6rem; margin: 0; }
+.update-toast[hidden] { display: none !important; }
+.update-toast-title { font-weight: 800; font-size: 0.95rem; margin-bottom: 4px; }
+.update-toast-message { margin: 0 0 0.75rem; font-size: 0.82rem; opacity: 0.9; line-height: 1.4; }
+.update-toast-actions { display: flex; gap: 0.6rem; justify-content: flex-end; }
+.update-toast-actions .btn { width: auto; min-width: 6rem; margin: 0; padding: 8px 14px; }
 .update-toast[aria-busy="true"] { cursor: progress; }
-.update-toast[aria-busy="true"] #update-now::before {
+.update-toast[aria-busy="true"] #btn-update-reload::before {
   content: '';
   display: inline-block;
   width: 0.75rem;
@@ -32,7 +33,7 @@
 
 @keyframes cardgamesmp-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .update-toast[aria-busy="true"] #update-now::before { animation: none; }
+  .update-toast[aria-busy="true"] #btn-update-reload::before { animation: none; }
 }
 
 /* Custom End Game confirmation dialog (URL-free, replaces window.confirm). */

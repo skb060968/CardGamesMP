@@ -1,7 +1,7 @@
 import { createActionCoordinator } from '../../core/action-coordinator.js';
 import { firebaseArray } from '../../core/firebase-array.js';
 import { generateRoomCode, normalizeRoomCode } from '../../core/room-code.js';
-import { createFirebaseRoomStore } from '../../data/firebase-room-store.js';
+import { createFirebaseRoomStore, isPlayerConnected } from '../../data/firebase-room-store.js';
 import { createGameSessionStore } from '../../platform/session-storage.js';
 import { createFlipAndMatchFlipAction } from './flip-action.js';
 import { createFlipAndMatchTransitionValidator } from './flip-transition.js';
@@ -40,6 +40,11 @@ function sortedPlayers(room) {
     .sort(([left], [right]) => Number(left.slice(7)) - Number(right.slice(7)));
 }
 
+/** Drop-at-start (standard): only seats that are connected right now are dealt in. */
+function connectedPlayers(room) {
+  return sortedPlayers(room).filter(([, player]) => isPlayerConnected(room, player.uid));
+}
+
 export function createFlipAndMatchRuntime({
   database,
   uid,
@@ -68,6 +73,7 @@ export function createFlipAndMatchRuntime({
   let host = false;
   let unsubscribeRoom = null;
   let stopPresence = null;
+  let stopReconnectWatch = null;
   let disposed = false;
   let reconcileChain = Promise.resolve();
   let rosterRefreshQueued = false;
@@ -192,7 +198,7 @@ export function createFlipAndMatchRuntime({
     });
   };
 
-  async function refreshRoom(move = null) {
+  async function refreshRoom(move = null, { forceSnapshot = false } = {}) {
     if (!store || disposed) return;
     let room;
     try {
@@ -219,7 +225,8 @@ export function createFlipAndMatchRuntime({
       if (move?.id) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
       } else if (
-        !state
+        forceSnapshot
+        || !state
         || room.game.revision !== state.revision
         || room.game.status !== state.status
       ) {
@@ -227,6 +234,7 @@ export function createFlipAndMatchRuntime({
         await renderState({ state });
         callbacks.onState?.(state, { remote: true, move: null });
       }
+      callbacks.onPresence?.({ room, state });
       return;
     }
     state = room.game;
@@ -244,10 +252,13 @@ export function createFlipAndMatchRuntime({
     unsubscribeRoom = store.subscribeRoom({
       onMove: (move) => enqueue(() => refreshRoom(move?.id ? move : null)),
       onStatus: () => enqueue(() => refreshRoom()),
+      onReset: () => enqueue(() => refreshRoom(null, { forceSnapshot: true })),
+      onPresence: () => enqueue(() => refreshRoom()),
       onPlayer: queueRosterRefresh,
       onError: reportError,
     });
     stopPresence = store.startPresence({ playerIndex: roomSlotIndex, onError: reportError });
+    stopReconnectWatch = store.watchReconnect(() => enqueue(() => refreshRoom(null, { forceSnapshot: true })));
 
     callbacks.onConnected?.({
       roomCode: store.roomCode,
@@ -259,6 +270,7 @@ export function createFlipAndMatchRuntime({
     if (room.meta?.status === 'active') {
       await renderState({ state });
       callbacks.onState?.(state, { remote: true, restored: true });
+      callbacks.onPresence?.({ room, state });
     } else {
       callbacks.onLobby?.({ room, roomCode: store.roomCode, isHost: host, roomSlotIndex });
     }
@@ -312,8 +324,8 @@ export function createFlipAndMatchRuntime({
     ensureConnected();
     const room = await store.readRoom();
     if (room.meta?.hostUid !== uid) throw new Error('Only the host can start a round');
-    const entries = sortedPlayers(room).slice(0, MAX_PLAYERS);
-    if (entries.length < 2) throw new Error('At least two players are required');
+    const entries = connectedPlayers(room).slice(0, MAX_PLAYERS);
+    if (entries.length < 2) throw new Error('At least two connected players are required');
 
     const baseState = rules.createGame(entries.map(([, player]) => ({
       name: player.name,
@@ -334,13 +346,27 @@ export function createFlipAndMatchRuntime({
     const updated = await store.resetRoom({
       state: nextState,
       status: 'active',
-      expectedRoster: Object.fromEntries(entries.map(([slot, player]) => [slot, player.uid])),
+      expectedRoster: Object.fromEntries(sortedPlayers(room).map(([slot, player]) => [slot, player.uid])),
     });
     state = updated.game;
     updateIdentity(updated);
     await renderState({ state });
     callbacks.onState?.(state, { remote: false, newRound: true });
+    callbacks.onPresence?.({ room: updated, state });
     return state;
+  }
+
+  /** Play Again (standard): host sends everyone back to the lobby; latecomers can join. */
+  async function returnToLobby() {
+    ensureConnected();
+    const room = await store.readRoom();
+    if (room.meta?.hostUid !== uid) throw new Error('Only the host can start another round');
+    if (room.game?.status !== 'finished') throw new Error('The current round is not finished');
+    const updated = await store.resetRoom({ state: waitingState(), status: 'waiting' });
+    state = updated.game;
+    updateIdentity(updated);
+    callbacks.onLobby?.({ room: updated, roomCode: store.roomCode, isHost: host, roomSlotIndex });
+    return updated;
   }
 
   async function removeLobbyPlayer({ playerIndex, expectedUid }) {
@@ -359,6 +385,7 @@ export function createFlipAndMatchRuntime({
 
   async function disconnectLocal({ suppressErrors = false } = {}) {
     if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
+    if (stopReconnectWatch) { stopReconnectWatch(); stopReconnectWatch = null; }
     if (stopPresence) {
       const stop = stopPresence;
       stopPresence = null;
@@ -393,7 +420,7 @@ export function createFlipAndMatchRuntime({
     joinRoom,
     restoreSession,
     startRound,
-    playAgain: startRound,
+    playAgain: returnToLobby,
     removePlayer: removeLobbyPlayer,
     flipCard: flipLocalCard,
     leaveRoom,
