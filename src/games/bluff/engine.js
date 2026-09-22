@@ -284,6 +284,62 @@ export function passCard(state, playerIndex) {
   return result;
 }
 
+/* ======= STANDARD OUT-OF-TURN MOVES (offline watchdog + claim) ======= */
+
+/**
+ * Watchdog skip for the offline current player. Mid-round it is a plain pass.
+ * When they were due to open a round (no rank set yet, so a pass is illegal)
+ * the opener role rotates to the next seat instead.
+ */
+export function skipTurn(state) {
+  assertValid(state);
+  if (state.status !== 'playing' || state.phase !== 'placing') throw new Error('Game is not in placing phase');
+  const playerIndex = state.currentPlayerIndex;
+  if (state.currentRank !== null) return passCard(state, playerIndex);
+  const accepted = finishProvisionalWinner(state);
+  if (accepted) return accepted;
+  const next = nextPlayer(state, playerIndex);
+  const result = {
+    ...cloneState(state),
+    currentPlayerIndex: next,
+    roundStartPlayer: next,
+    lastPlacement: null,
+    playersActedThisRound: [],
+    revision: state.revision + 1,
+  };
+  assertValid(result);
+  return result;
+}
+
+/**
+ * Claim: everyone else is offline. The actor lays down their whole hand onto
+ * the pile and wins — that keeps card conservation and the "winner holds no
+ * cards" invariant without a schema change.
+ */
+export function claimWin(state, actorIndex) {
+  assertValid(state);
+  if (state.status !== 'playing' || state.phase !== 'placing') throw new Error('Game is not in placing phase');
+  assertPlayerIndex(state, actorIndex, 'actorIndex');
+  const actorHand = state.players[actorIndex].hand.map(cloneCard);
+  const result = {
+    ...cloneState(state),
+    players: state.players.map((player, index) => (index === actorIndex
+      ? { ...clonePlayer(player), hand: [] }
+      : clonePlayer(player))),
+    centerPile: [...state.centerPile.map(cloneCard), ...actorHand],
+    phase: 'finished',
+    status: 'finished',
+    winnerIndex: actorIndex,
+    lastPlacement: null,
+    currentRank: null,
+    roundStartPlayer: state.currentPlayerIndex,
+    playersActedThisRound: [],
+    revision: state.revision + 1,
+  };
+  assertValid(result);
+  return result;
+}
+
 export function deriveChallengeOutcome(state, challengerIndex) {
   assertValid(state);
   assertPlayerIndex(state, challengerIndex, 'challengerIndex');

@@ -9,6 +9,8 @@ const STATE_KEYS = new Set([
   'players', 'playerSlots', 'drawPile', 'discardPile', 'currentPlayerIndex',
   'turnPhase', 'status', 'winnerIndex', 'winGroups', 'deckCount', 'deckSize',
   'prng', 'revision',
+  // Optional; only ever 'forfeit' (claim-win: every other seat went offline).
+  'finishReason',
 ]);
 const PLAYER_KEYS = new Set(['name', 'emoji', 'hand', 'connected', 'slotId']);
 const CARD_KEYS = new Set(['id', 'rank', 'suit', 'deckIndex']);
@@ -297,6 +299,53 @@ export function discardCard(state, handIndex) {
   return { newState, won: win.won, winGroups: win.groups };
 }
 
+/* ======= STANDARD OUT-OF-TURN MOVES (offline watchdog + claim) ======= */
+
+/**
+ * Watchdog skip for the offline current player. Stalled after drawing → their
+ * drawn card (always the last in hand) is discarded for them, which also passes
+ * the turn. Stalled before drawing → the turn simply passes.
+ */
+export function skipTurn(state) {
+  assertValid(state);
+  if (state.status !== 'playing') throw new Error('Game is not active');
+  if (state.turnPhase === 'discard') {
+    const hand = state.players[state.currentPlayerIndex].hand;
+    return discardCard(state, hand.length - 1).newState;
+  }
+  const next = {
+    ...state,
+    players: state.players.map((player) => ({ ...player, hand: player.hand.map(cloneCard) })),
+    drawPile: state.drawPile.map(cloneCard),
+    discardPile: state.discardPile.map(cloneCard),
+    prng: { ...state.prng },
+    currentPlayerIndex: (state.currentPlayerIndex + 1) % state.players.length,
+  };
+  assertValid(next);
+  return next;
+}
+
+/** Claim: everyone else is offline; the actor wins by forfeit, hands untouched. */
+export function claimWin(state, actorIndex) {
+  assertValid(state);
+  if (state.status !== 'playing') throw new Error('Game is not active');
+  if (!state.players[actorIndex]) throw new RangeError('Invalid actorIndex');
+  const next = {
+    ...state,
+    players: state.players.map((player) => ({ ...player, hand: player.hand.map(cloneCard) })),
+    drawPile: state.drawPile.map(cloneCard),
+    discardPile: state.discardPile.map(cloneCard),
+    prng: { ...state.prng },
+    status: 'finished',
+    turnPhase: 'finished',
+    winnerIndex: actorIndex,
+    winGroups: null,
+    finishReason: 'forfeit',
+  };
+  assertValid(next);
+  return next;
+}
+
 export function validateState(state) {
   if (!hasOnlyKeys(state, STATE_KEYS)) return invalid('Invalid state object or unexpected state key');
   if (!Array.isArray(state.players) || state.players.length < MIN_PLAYERS || state.players.length > MAX_PLAYERS) {
@@ -314,6 +363,9 @@ export function validateState(state) {
   if (!Number.isInteger(state.currentPlayerIndex) || state.currentPlayerIndex < 0
     || state.currentPlayerIndex >= state.players.length) return invalid('Invalid current player index');
   if (!Number.isSafeInteger(state.revision) || state.revision < 0) return invalid('Invalid revision');
+  const forfeit = state.finishReason === 'forfeit';
+  if (state.finishReason !== undefined && !forfeit) return invalid('Invalid finish reason');
+  if (forfeit && state.status !== 'finished') return invalid('Forfeit requires a finished game');
   if (!hasOnlyKeys(state.prng, PRNG_KEYS)
     || state.prng.algorithm !== PRNG_ALGORITHM
     || !Number.isSafeInteger(state.prng.seed) || state.prng.seed <= 0 || state.prng.seed > UINT32_MAX
@@ -354,9 +406,13 @@ export function validateState(state) {
     } else if ('slotId' in player) {
       return invalid(`Unexpected slot ownership at player ${index}`);
     }
+    const isCurrent = index === state.currentPlayerIndex;
     const expectedHandSize = state.status === 'playing' && state.turnPhase === 'discard'
-      && index === state.currentPlayerIndex ? HAND_SIZE + 1 : HAND_SIZE;
-    if (player.hand.length !== expectedHandSize) return invalid(`Invalid hand size at player ${index}`);
+      && isCurrent ? HAND_SIZE + 1 : HAND_SIZE;
+    // A forfeit may freeze the stalled seat mid-turn, holding the drawn card.
+    const handOk = player.hand.length === expectedHandSize
+      || (forfeit && isCurrent && player.hand.length === HAND_SIZE + 1);
+    if (!handOk) return invalid(`Invalid hand size at player ${index}`);
     for (const card of player.hand) {
       const error = validateCard(card);
       if (error) return invalid(error);
@@ -372,6 +428,11 @@ export function validateState(state) {
 
   if (state.status === 'playing') {
     if (state.winnerIndex !== null || state.winGroups !== null) return invalid('Playing state cannot contain winner data');
+  } else if (forfeit) {
+    if (!Number.isInteger(state.winnerIndex) || state.winnerIndex < 0 || state.winnerIndex >= state.players.length) {
+      return invalid('Invalid winner index');
+    }
+    if (state.winGroups !== null) return invalid('Forfeit finish cannot contain win groups');
   } else if (state.winnerIndex === null) {
     if (state.winGroups !== null) return invalid('No-winner finish cannot contain win groups');
   } else {

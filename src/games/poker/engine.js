@@ -340,6 +340,63 @@ export function performAction(state, playerIndex, action) {
   return result;
 }
 
+/* ======= STANDARD OUT-OF-TURN MOVES (offline watchdog + claim) ======= */
+
+/**
+ * Watchdog skip: the offline current player is folded for them. Unlike a
+ * voluntary fold this ignores the "can't fold in round one if you can call"
+ * rule — the seat is not there to call. One player left → they take the pot.
+ */
+export function skipTurn(state) {
+  assertValid(state);
+  if (state.status !== 'betting') throw new Error('Cannot skip: game is not in betting phase');
+  const playerIndex = state.currentPlayerIndex;
+  const players = state.players.map(clonePlayer);
+  players[playerIndex].folded = true;
+  players[playerIndex].hasActed = true;
+  return settleAfterFold(state, players, state.pot);
+}
+
+/**
+ * Claim: everyone else is offline, so they all fold and the actor takes the pot.
+ * Chips already committed stay in the pot that the actor collects.
+ */
+export function claimWin(state, actorIndex) {
+  assertValid(state);
+  if (state.status !== 'betting') throw new Error('Cannot claim: game is not in betting phase');
+  const actor = state.players[actorIndex];
+  if (!actor) throw new RangeError('Invalid actorIndex');
+  if (actor.broke) throw new Error('A broke player cannot claim the pot');
+  const players = state.players.map((player, index) => {
+    const copy = clonePlayer(player);
+    if (index === actorIndex) copy.folded = false;
+    else { copy.folded = true; copy.hasActed = true; }
+    return copy;
+  });
+  return settleAfterFold(state, players, state.pot);
+}
+
+/** Shared tail of a fold: finish when one seat remains, else pass the turn. */
+function settleAfterFold(state, players, pot) {
+  const remaining = players.map((item, index) => ({ item, index }))
+    .filter(({ item }) => !item.folded).map(({ index }) => index);
+  if (remaining.length === 1) {
+    const winnerIndex = remaining[0];
+    players[winnerIndex].chips += pot;
+    const result = {
+      ...state, players, deck: state.deck.map(cloneCard), prng: { ...state.prng },
+      pot: 0, status: 'finished', winnerIndex, showEligible: false, finishReason: 'fold',
+    };
+    assertValid(result);
+    return result;
+  }
+  const temporary = { ...state, players, deck: state.deck.map(cloneCard), prng: { ...state.prng }, pot };
+  const currentPlayerIndex = nextActivePlayer(temporary);
+  const result = { ...temporary, currentPlayerIndex, showEligible: checkShowEligible({ ...temporary, currentPlayerIndex }) };
+  assertValid(result);
+  return result;
+}
+
 export function validateState(state) {
   if (!hasOnlyKeys(state, STATE_KEYS)) return invalid('Invalid state object or unexpected state key');
   if (!Array.isArray(state.players) || state.players.length < MIN_PLAYERS || state.players.length > MAX_PLAYERS) {

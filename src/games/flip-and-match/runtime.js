@@ -5,6 +5,8 @@ import { createFirebaseRoomStore, isPlayerConnected } from '../../data/firebase-
 import { createGameSessionStore } from '../../platform/session-storage.js';
 import { createFlipAndMatchFlipAction } from './flip-action.js';
 import { createFlipAndMatchTransitionValidator } from './flip-transition.js';
+import { createOutOfTurnTransitionValidator } from '../../shared/out-of-turn-transition.js';
+import { createOutOfTurnMoves } from '../../shared/out-of-turn-moves.js';
 
 const GAME_ID = 'flip-and-match';
 const MAX_PLAYERS = 4;
@@ -66,7 +68,11 @@ export function createFlipAndMatchRuntime({
   requireFunction(codeGenerator, 'codeGenerator');
 
   const sessions = createGameSessionStore(GAME_ID, storage);
+  const validateOutOfTurn = createOutOfTurnTransitionValidator(rules);
+  const validateFlip = createFlipAndMatchTransitionValidator(rules);
+  const validateTransition = (parameters) => validateOutOfTurn(parameters) ?? validateFlip(parameters);
   let state = null;
+  let lastMove = null;
   let store = null;
   let roomSlotIndex = -1;
   let gamePlayerIndex = -1;
@@ -180,7 +186,7 @@ export function createFlipAndMatchRuntime({
     maxPlayers: MAX_PLAYERS,
     decodeState: decodeGameState,
     generateRoomCode: () => normalizeRoomCode(codeGenerator(), 'generated roomCode'),
-    validateTransition: createFlipAndMatchTransitionValidator(rules),
+    validateTransition,
   });
 
   const enqueue = (task) => {
@@ -221,6 +227,7 @@ export function createFlipAndMatchRuntime({
       return;
     }
     updateIdentity(room);
+    lastMove = room.lastMove ?? null;
     if (room.meta?.status === 'active' && room.game) {
       if (move?.id) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
@@ -360,13 +367,35 @@ export function createFlipAndMatchRuntime({
   async function returnToLobby() {
     ensureConnected();
     const room = await store.readRoom();
-    if (room.meta?.hostUid !== uid) throw new Error('Only the host can start another round');
+    if (room.meta?.hostUid !== uid && !store.canActForOfflineHost(room)) {
+      throw new Error('Only the host can start another round');
+    }
     if (room.game?.status !== 'finished') throw new Error('The current round is not finished');
     const updated = await store.resetRoom({ state: waitingState(), status: 'waiting' });
     state = updated.game;
     updateIdentity(updated);
     callbacks.onLobby?.({ room: updated, roomCode: store.roomCode, isHost: host, roomSlotIndex });
     return updated;
+  }
+
+  const outOfTurn = createOutOfTurnMoves({
+    rules,
+    getStore: () => store,
+    getState: () => state,
+    getActorIndex: () => gamePlayerIndex,
+    afterCommit: () => enqueue(() => refreshRoom()),
+  });
+
+  /** Leave a running round without giving up the seat (standard). */
+  async function leaveSeat() {
+    ensureConnected();
+    const activeStore = store;
+    await disconnectLocal();
+    try { await activeStore.markSelfOffline(); } catch (error) { reportError(error); }
+    sessions.clear();
+    disposed = true;
+    coordinator.dispose();
+    callbacks.onDisconnected?.({ deleted: false, leftSeat: true });
   }
 
   async function removeLobbyPlayer({ playerIndex, expectedUid }) {
@@ -423,11 +452,16 @@ export function createFlipAndMatchRuntime({
     playAgain: returnToLobby,
     removePlayer: removeLobbyPlayer,
     flipCard: flipLocalCard,
+    skipStalledTurn: outOfTurn.skipStalledTurn,
+    claimWin: outOfTurn.claimWin,
+    leaveSeat,
+    canActForOfflineHost: (room) => Boolean(store?.canActForOfflineHost(room)),
     leaveRoom,
     close,
     refresh: () => refreshRoom(),
     get roomCode() { return store?.roomCode || null; },
     get currentState() { return state; },
+    get lastMove() { return lastMove; },
     get playerSlotIndex() { return roomSlotIndex; },
     get playerIndex() { return gamePlayerIndex; },
     get isHost() { return host; },

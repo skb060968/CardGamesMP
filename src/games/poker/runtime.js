@@ -5,6 +5,8 @@ import { createFirebaseRoomStore, isPlayerConnected } from '../../data/firebase-
 import { createGameSessionStore } from '../../platform/session-storage.js';
 import { createPokerAction } from './poker-action.js';
 import { createPokerTransitionValidator } from './poker-transition.js';
+import { createOutOfTurnTransitionValidator } from '../../shared/out-of-turn-transition.js';
+import { createOutOfTurnMoves } from '../../shared/out-of-turn-moves.js';
 
 const GAME_ID = 'poker';
 const MAX_PLAYERS = 4;
@@ -80,8 +82,11 @@ export function createPokerRuntime({
   requireFunction(codeGenerator, 'codeGenerator');
 
   const sessions = createGameSessionStore(GAME_ID, storage);
-  const validateTransition = createPokerTransitionValidator(rules);
+  const validateOutOfTurn = createOutOfTurnTransitionValidator(rules, { activeStatus: 'betting' });
+  const validatePoker = createPokerTransitionValidator(rules);
+  const validateTransition = (parameters) => validateOutOfTurn(parameters) ?? validatePoker(parameters);
   let state = null;
+  let lastMove = null;
   let store = null;
   let roomSlotIndex = -1;
   let gamePlayerIndex = -1;
@@ -244,6 +249,7 @@ export function createPokerRuntime({
       return;
     }
     updateIdentity(room);
+    lastMove = room.lastMove ?? null;
     if (room.meta?.status === 'active' && room.game) {
       const incoming = room.game;
       if (!forceSnapshot && state && incoming.revision <= state.revision) {
@@ -414,7 +420,9 @@ export function createPokerRuntime({
   async function playAgain() {
     ensureConnected();
     const room = await store.readRoom();
-    if (room.meta?.hostUid !== uid) throw new Error('Only the host can start another round');
+    if (room.meta?.hostUid !== uid && !store.canActForOfflineHost(room)) {
+      throw new Error('Only the host can start another round');
+    }
     if (room.game?.status !== 'finished') throw new Error('The current round is not finished');
     const balances = {};
     firebaseArray(room.game.playerSlots).forEach((slot, index) => {
@@ -492,6 +500,28 @@ export function createPokerRuntime({
     callbacks.onDisconnected?.({ deleted: false, localOnly: true });
   }
 
+  const outOfTurn = createOutOfTurnMoves({
+    rules,
+    activeStatus: 'betting',
+    getStore: () => store,
+    getState: () => state,
+    getActorIndex: () => gamePlayerIndex,
+    afterCommit: () => enqueue(() => refreshRoom()),
+  });
+
+  /** Leave a running round without giving up the seat (standard). */
+  async function leaveSeat() {
+    ensureConnected();
+    const activeStore = store;
+    await disconnectLocal();
+    try { await activeStore.markSelfOffline(); } catch (error) { reportError(error); }
+    sessions.clear();
+    disposed = true;
+    commitPoker = null;
+    coordinator.dispose();
+    callbacks.onDisconnected?.({ deleted: false, leftSeat: true });
+  }
+
   return Object.freeze({
     createRoom,
     joinRoom,
@@ -500,11 +530,16 @@ export function createPokerRuntime({
     playAgain,
     removePlayer: removeLobbyPlayer,
     act: actLocal,
+    skipStalledTurn: outOfTurn.skipStalledTurn,
+    claimWin: outOfTurn.claimWin,
+    leaveSeat,
+    canActForOfflineHost: (room) => Boolean(store?.canActForOfflineHost(room)),
     leaveRoom,
     close,
     refresh: () => refreshRoom(),
     get roomCode() { return store?.roomCode || null; },
     get currentState() { return state; },
+    get lastMove() { return lastMove; },
     get playerSlotIndex() { return roomSlotIndex; },
     get playerIndex() { return gamePlayerIndex; },
     get isHost() { return host; },

@@ -725,9 +725,36 @@ body {
   transition: transform 0.12s, filter 0.12s;
 }
 
-.btn-end-game:hover { filter: brightness(1.1); }
+@media (hover: hover) and (pointer: fine) {
+  .btn-end-game:hover { filter: brightness(1.1); }
+}
 .btn-end-game:active { transform: scale(0.9); }
 .btn-end-game[hidden] { display: none !important; }
+
+/* Standard claim-win pill (shown only when every other seat is offline) */
+.btn-claim-win {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: #1a1a1a;
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  transition: transform 0.12s, filter 0.12s;
+}
+.btn-claim-win:active { transform: scale(0.95); }
+.btn-claim-win:disabled { opacity: 0.6; cursor: progress; }
+.btn-claim-win[hidden] { display: none !important; }
+
+/* Standard results note for a win by drop-out */
+.results-note {
+  margin-top: 6px;
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
 
 /* =========================================================
    13) LOBBY SCREEN

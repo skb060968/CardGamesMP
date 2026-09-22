@@ -442,59 +442,141 @@ function syncSeatPresence() {
   });
 }
 
-function showPPPFinished(state, gameRuntime) {
-  showScreen('ppp-results');
-  const button = element('btn-play-again');
-  button.disabled = !gameRuntime.isHost;
-  button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
-  const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
-  if (winner) announceWin(winner.name);
+/* ---- Offline-stall watchdog + claim-win + host-loss (STANDARD, §6) ----
+   Every connected client re-evaluates these on every presence tick and every
+   state change. The watchdog arms against a generation key
+   (`revision:currentPlayerIndex`), staggered by connected rank so the first
+   connected seat normally fires first and the others find the turn moved. The
+   store re-checks presence inside its transaction, so a race loses cleanly. */
+const TURN_GRACE_MS = 15000;
+const STAGGER_MS = 400;
+const RESULTS_BY_GAME = Object.freeze({
+  'patte-par-patta': { screenId: 'ppp-results', buttonId: 'btn-play-again', displayId: 'winner-display' },
+  'flip-and-match': { screenId: 'fm-results', buttonId: 'fm-btn-play-again', displayId: 'fm-winner-display' },
+  'simple-rummy': { screenId: 'sr-results', buttonId: 'sr-btn-play-again', displayId: 'sr-winner-display' },
+  'perfect-ten': { screenId: 'pt-results', buttonId: 'pt-btn-play-again', displayId: 'pt-winner-display' },
+  'poker': { screenId: 'pk-results', buttonId: 'pk-btn-play-again', displayId: 'pk-winner-display' },
+  'bluff': { screenId: 'bl-results', buttonId: 'bl-btn-play-again', displayId: 'bl-winner-display' },
+});
+let watchdogTimer = null;
+let watchdogKey = null;
+
+function clearWatchdog() {
+  if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
+  watchdogKey = null;
 }
 
-function showFMFinished(state, gameRuntime) {
-  showScreen('fm-results');
-  const button = element('fm-btn-play-again');
-  button.disabled = !gameRuntime.isHost;
-  button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
-  const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
-  if (winner && !state.isTie) announceWin(winner.name);
+/** Game seats (indices into `state.players`) that are connected right now, in seat order. */
+function connectedSeats() {
+  const state = runtime?.currentState;
+  if (!presenceRoom || !Array.isArray(state?.playerSlots)) return [];
+  return state.playerSlots
+    .map((slot, seat) => ({ seat, uid: presenceRoom.players?.[slot]?.uid }))
+    .filter(({ seat, uid }) => seat === runtime.playerIndex || isPlayerConnected(presenceRoom, uid))
+    .map(({ seat }) => seat);
 }
 
-function showSRFinished(state, gameRuntime) {
-  showScreen('sr-results');
-  const button = element('sr-btn-play-again');
-  button.disabled = !gameRuntime.isHost;
-  button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
-  const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
-  if (winner) announceWin(winner.name);
+/** Never treat yourself as the dropped player (§6). */
+function seatOffline(seat) {
+  const state = runtime?.currentState;
+  const slot = state?.playerSlots?.[seat];
+  if (!presenceRoom || !slot || seat === runtime.playerIndex) return false;
+  return !isPlayerConnected(presenceRoom, presenceRoom.players?.[slot]?.uid);
 }
 
-function showPTFinished(state, gameRuntime) {
-  showScreen('pt-results');
-  const button = element('pt-btn-play-again');
-  button.disabled = !gameRuntime.isHost;
-  button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
-  const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
-  if (winner) announceWin(winner.name);
+function othersAllOffline() {
+  const state = runtime?.currentState;
+  if (!Array.isArray(state?.playerSlots) || runtime.playerIndex < 0) return false;
+  const others = state.playerSlots.map((_, seat) => seat).filter((seat) => seat !== runtime.playerIndex);
+  return others.length > 0 && others.every(seatOffline);
 }
 
-function showPKFinished(state, gameRuntime) {
-  showScreen('pk-results');
-  const button = element('pk-btn-play-again');
-  button.disabled = !gameRuntime.isHost;
-  button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
-  const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
-  if (winner) announceWin(winner.name);
+function scheduleWatchdog() {
+  const state = runtime?.currentState;
+  if (!runtime?.connected || !isActiveGameState(activeGameId, state) || runtime.playerIndex < 0) { clearWatchdog(); return; }
+  const cur = state.currentPlayerIndex;
+  if (!seatOffline(cur)) { clearWatchdog(); return; }
+  const key = `${state.revision}:${cur}`;
+  if (watchdogKey === key && watchdogTimer) return;
+  clearWatchdog();
+  watchdogKey = key;
+  const rank = Math.max(0, connectedSeats().indexOf(runtime.playerIndex));
+  watchdogTimer = setTimeout(async () => {
+    watchdogTimer = null;
+    const latest = runtime?.currentState;
+    if (!runtime?.connected || !isActiveGameState(activeGameId, latest)) return;
+    if (`${latest.revision}:${latest.currentPlayerIndex}` !== key || !seatOffline(cur)) return;
+    try {
+      await runtime.skipStalledTurn();
+    } catch (error) {
+      // Another seat usually got there first (revision-conflict / target-online).
+      console.warn('[CardGamesMP] skip-turn not applied:', error?.code || error?.message || error);
+    }
+  }, TURN_GRACE_MS + rank * STAGGER_MS);
 }
 
-function showBLFinished(state, gameRuntime) {
-  showScreen('bl-results');
-  const button = element('bl-btn-play-again');
-  button.disabled = !gameRuntime.isHost;
-  button.textContent = gameRuntime.isHost ? 'Play Again' : 'Waiting for host…';
-  const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
-  if (winner) announceWin(winner.name);
+function refreshClaimButtons() {
+  END_GAME_CONTROLS.forEach(({ gameId, claimId }) => {
+    const button = element(claimId);
+    if (!button) return;
+    const mine = gameId === activeGameId;
+    button.hidden = !mine || !runtime?.connected
+      || !isActiveGameState(gameId, runtime.currentState) || !othersAllOffline();
+  });
 }
+
+/** Host, or — when the host has dropped — the first connected seat (host-loss inheritance). */
+function mayRestart() {
+  if (!runtime?.connected || runtime.currentState?.status !== 'finished') return false;
+  if (runtime.isHost) return true;
+  return runtime.canActForOfflineHost(presenceRoom);
+}
+
+function refreshPlayAgainButton() {
+  const results = RESULTS_BY_GAME[activeGameId];
+  const button = results ? element(results.buttonId) : null;
+  if (!button || runtime?.currentState?.status !== 'finished') return;
+  if (button.dataset.busy === 'true') return;
+  const can = mayRestart();
+  // The host always sits in room slot player_0 (hostSlot is pinned by the rules).
+  const hostOffline = Boolean(presenceRoom) && !isPlayerConnected(presenceRoom, presenceRoom.players?.player_0?.uid);
+  button.disabled = !can;
+  button.textContent = can ? 'Play Again' : (hostOffline ? 'Waiting…' : 'Waiting for host…');
+}
+
+/** Re-evaluate every stall guard; called on each presence tick and state change. */
+function refreshStallGuards() {
+  scheduleWatchdog();
+  refreshClaimButtons();
+  refreshPlayAgainButton();
+}
+
+/**
+ * Shared results presenter. Adds the standard `.results-note` when the round
+ * ended because everyone else went offline (a `claim-win` move).
+ */
+function presentFinished(gameId, state, gameRuntime, { announce = true } = {}) {
+  const { screenId, displayId } = RESULTS_BY_GAME[gameId];
+  showScreen(screenId);
+  clearWatchdog();
+  const display = element(displayId);
+  if (display && gameRuntime.lastMove?.type === 'claim-win' && !display.querySelector('.results-note')) {
+    const note = document.createElement('div');
+    note.className = 'results-note';
+    note.textContent = 'Everyone else went offline';
+    display.appendChild(note);
+  }
+  refreshPlayAgainButton();
+  const winner = state.winnerIndex == null ? null : state.players[state.winnerIndex];
+  if (winner && announce) announceWin(winner.name);
+}
+
+const showPPPFinished = (state, gameRuntime) => presentFinished('patte-par-patta', state, gameRuntime);
+const showFMFinished = (state, gameRuntime) => presentFinished('flip-and-match', state, gameRuntime, { announce: !state.isTie });
+const showSRFinished = (state, gameRuntime) => presentFinished('simple-rummy', state, gameRuntime);
+const showPTFinished = (state, gameRuntime) => presentFinished('perfect-ten', state, gameRuntime);
+const showPKFinished = (state, gameRuntime) => presentFinished('poker', state, gameRuntime);
+const showBLFinished = (state, gameRuntime) => presentFinished('bluff', state, gameRuntime);
 
 async function firebaseClient() {
   if (!firebaseClientPromise) firebaseClientPromise = createFirebaseClient();
@@ -509,21 +591,24 @@ async function buildRuntime(gameId) {
       console.error(`[CardGamesMP:${gameId}]`, error);
       showToast(errorMessage(error, `runtime:${gameId}`), 3000);
     },
-    onDisconnected: ({ removed = false, roomDeleted = false } = {}) => {
+    onDisconnected: ({ removed = false, roomDeleted = false, leftSeat = false } = {}) => {
       if (runtime === candidate) {
         runtime = null;
         activeGameId = null;
         presenceRoom = null;
+        clearWatchdog();
         hideVoiceDock();
         showScreen('landing-page');
         if (removed) showToast('The host removed you from the lobby.', 3500);
         else if (roomDeleted) showToast('The room was closed by the host.', 3500);
+        else if (leftSeat) showToast('You left the game. The others keep playing.', 3000);
       }
     },
     onPresence: ({ room }) => {
       if (runtime !== candidate) return;
       presenceRoom = room;
       syncSeatPresence();
+      refreshStallGuards();
     },
   };
 
@@ -546,7 +631,7 @@ async function buildRuntime(gameId) {
         ...commonCallbacks,
         onConnected: ({ roomCode }) => { element('lobby-room-code').textContent = roomCode; },
         onLobby: renderPPPLobby,
-        onState: (state) => { if (state.status === 'playing') showScreen('ppp-gameplay'); syncSeatPresence(); },
+        onState: (state) => { if (state.status === 'playing') showScreen('ppp-gameplay'); syncSeatPresence(); refreshStallGuards(); },
       },
     });
     return candidate;
@@ -570,7 +655,7 @@ async function buildRuntime(gameId) {
         ...commonCallbacks,
         onConnected: ({ roomCode }) => { element('fm-lobby-room-code').textContent = roomCode; },
         onLobby: renderFMLobby,
-        onState: (state) => { if (state.status === 'playing') showScreen('fm-gameplay'); syncSeatPresence(); },
+        onState: (state) => { if (state.status === 'playing') showScreen('fm-gameplay'); syncSeatPresence(); refreshStallGuards(); },
       },
     });
     return candidate;
@@ -595,7 +680,7 @@ async function buildRuntime(gameId) {
         ...commonCallbacks,
         onConnected: ({ roomCode }) => { element('sr-lobby-room-code').textContent = roomCode; },
         onLobby: renderSRLobby,
-        onState: (state) => { if (state.status === 'playing') showScreen('sr-gameplay'); syncSeatPresence(); },
+        onState: (state) => { if (state.status === 'playing') showScreen('sr-gameplay'); syncSeatPresence(); refreshStallGuards(); },
       },
     });
     return candidate;
@@ -620,7 +705,7 @@ async function buildRuntime(gameId) {
         ...commonCallbacks,
         onConnected: ({ roomCode }) => { element('pt-lobby-room-code').textContent = roomCode; },
         onLobby: renderPTLobby,
-        onState: (state) => { if (state.status === 'playing') showScreen('pt-gameplay'); syncSeatPresence(); },
+        onState: (state) => { if (state.status === 'playing') showScreen('pt-gameplay'); syncSeatPresence(); refreshStallGuards(); },
       },
     });
     return candidate;
@@ -648,7 +733,7 @@ async function buildRuntime(gameId) {
         },
         onConnected: ({ roomCode }) => { element('pk-lobby-room-code').textContent = roomCode; },
         onLobby: renderPKLobby,
-        onState: (state) => { if (state.status === 'betting') showScreen('pk-gameplay'); syncSeatPresence(); },
+        onState: (state) => { if (state.status === 'betting') showScreen('pk-gameplay'); syncSeatPresence(); refreshStallGuards(); },
       },
     });
     return candidate;
@@ -680,7 +765,7 @@ async function buildRuntime(gameId) {
         },
         onConnected: ({ roomCode }) => { element('bl-lobby-room-code').textContent = roomCode; },
         onLobby: renderBLLobby,
-        onState: (state) => { if (state.status === 'playing') showScreen('bl-gameplay'); syncSeatPresence(); },
+        onState: (state) => { if (state.status === 'playing') showScreen('bl-gameplay'); syncSeatPresence(); refreshStallGuards(); },
       },
     });
     return candidate;
@@ -769,6 +854,19 @@ async function leaveCurrentRoom() {
   showScreen('landing-page');
 }
 
+/** Play Again (host, or the inheriting seat when the host is gone) → back to the lobby. */
+async function handlePlayAgain(event) {
+  const button = event.currentTarget;
+  if (!mayRestart()) { refreshPlayAgainButton(); return; }
+  button.dataset.busy = 'true';   // keeps presence ticks from repainting the label mid-flight
+  try {
+    await runBusy(button, 'Back to lobby…', () => runtime.playAgain());
+  } finally {
+    delete button.dataset.busy;
+    refreshPlayAgainButton();
+  }
+}
+
 /** Standard How-to-Play screen per game: `<p>-btn-how-to` opens `<p>-how-to`, back returns to `<p>-online-choice`. */
 function wireHowToScreens() {
   for (const prefix of ['ppp', 'fm', 'sr', 'pt', 'pk', 'bl']) {
@@ -810,7 +908,7 @@ function wirePPP() {
     const result = await runtime.throwCard(Number(card.dataset.handIndex || 0));
     if (result && !result.ok && result.reason === 'busy') showToast('Finishing the current animation…');
   });
-  element('btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
+  element('btn-play-again').addEventListener('click', handlePlayAgain);
   element('btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Patte Par Patta', 'patte-par-patta')();
@@ -845,7 +943,7 @@ function wireFlipAndMatch() {
   }));
   element('fm-btn-start-online').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.startRound()));
   element('fm-btn-leave-lobby').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
-  element('fm-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
+  element('fm-btn-play-again').addEventListener('click', handlePlayAgain);
   element('fm-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('fm-btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Flip & Match', 'flip-and-match')();
@@ -884,7 +982,7 @@ function wireSimpleRummy() {
   element('sr-gameplay').addEventListener('click', (event) => {
     if (activeGameId === 'simple-rummy' && event.target.closest('[data-draw-source], [data-hand-index]')) warmSpeech();
   });
-  element('sr-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
+  element('sr-btn-play-again').addEventListener('click', handlePlayAgain);
   element('sr-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('sr-btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Simple Rummy', 'simple-rummy')();
@@ -923,7 +1021,7 @@ function wirePerfectTen() {
   element('pt-gameplay').addEventListener('click', (event) => {
     if (activeGameId === 'perfect-ten' && event.target.closest('[data-draw-source], [data-hand-index]')) warmSpeech();
   });
-  element('pt-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
+  element('pt-btn-play-again').addEventListener('click', handlePlayAgain);
   element('pt-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('pt-btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Perfect Ten', 'perfect-ten')();
@@ -959,7 +1057,7 @@ function wirePoker() {
   }));
   element('pk-btn-start-online').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.startRound()));
   element('pk-btn-leave-lobby').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
-  element('pk-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
+  element('pk-btn-play-again').addEventListener('click', handlePlayAgain);
   element('pk-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('pk-btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Poker', 'poker')();
@@ -995,7 +1093,7 @@ function wireBluff() {
   }));
   element('bl-btn-start-online').addEventListener('click', (event) => runBusy(event.currentTarget, 'Starting…', () => runtime?.startRound()));
   element('bl-btn-leave-lobby').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
-  element('bl-btn-play-again').addEventListener('click', (event) => runBusy(event.currentTarget, 'Back to lobby…', () => runtime?.isHost && runtime.playAgain()));
+  element('bl-btn-play-again').addEventListener('click', handlePlayAgain);
   element('bl-btn-home').addEventListener('click', () => leaveCurrentRoom().catch((error) => showToast(errorMessage(error), 3000)));
   element('bl-btn-share-code').addEventListener('click', () => {
     if (runtime?.roomCode) createShareHandler(runtime.roomCode, 'Bluff', 'bluff')();
@@ -1102,12 +1200,12 @@ if (typeof window !== 'undefined') {
 }
 
 const END_GAME_CONTROLS = Object.freeze([
-  { gameId: 'patte-par-patta', buttonId: 'btn-end-game', screenId: 'ppp-gameplay', container: '.game-controls' },
-  { gameId: 'flip-and-match', buttonId: 'fm-btn-end-game', screenId: 'fm-gameplay', container: '.game-controls' },
-  { gameId: 'simple-rummy', buttonId: 'sr-btn-end-game', screenId: 'sr-gameplay', container: '.game-controls' },
-  { gameId: 'perfect-ten', buttonId: 'pt-btn-end-game', screenId: 'pt-gameplay', container: '.game-controls' },
-  { gameId: 'poker', buttonId: 'pk-btn-end-game', screenId: 'pk-gameplay', container: '.game-self-controls' },
-  { gameId: 'bluff', buttonId: 'bl-btn-end-game', screenId: 'bl-gameplay', container: '.game-self-controls' },
+  { gameId: 'patte-par-patta', buttonId: 'btn-end-game', claimId: 'ppp-btn-claim-win', screenId: 'ppp-gameplay', container: '.game-controls' },
+  { gameId: 'flip-and-match', buttonId: 'fm-btn-end-game', claimId: 'fm-btn-claim-win', screenId: 'fm-gameplay', container: '.game-controls' },
+  { gameId: 'simple-rummy', buttonId: 'sr-btn-end-game', claimId: 'sr-btn-claim-win', screenId: 'sr-gameplay', container: '.game-controls' },
+  { gameId: 'perfect-ten', buttonId: 'pt-btn-end-game', claimId: 'pt-btn-claim-win', screenId: 'pt-gameplay', container: '.game-controls' },
+  { gameId: 'poker', buttonId: 'pk-btn-end-game', claimId: 'pk-btn-claim-win', screenId: 'pk-gameplay', container: '.game-self-controls' },
+  { gameId: 'bluff', buttonId: 'bl-btn-end-game', claimId: 'bl-btn-claim-win', screenId: 'bl-gameplay', container: '.game-self-controls' },
 ]);
 
 function isActiveGameState(gameId, state) {
@@ -1133,49 +1231,83 @@ function setupEndGameControls() {
     if (!screen || !button) return null;
     button.classList.add('btn-end-game');
     button.type = 'button';
-    button.title = 'End game';
-    button.setAttribute('aria-label', 'End game');
-    return { definition, screen, button };
+    button.title = 'Leave game';
+    button.setAttribute('aria-label', 'Leave game');
+
+    // Standard claim-win button lives beside ✕ and is shown only when every
+    // other seat is offline (see refreshClaimButtons).
+    let claim = element(definition.claimId);
+    if (!claim) {
+      claim = document.createElement('button');
+      claim.id = definition.claimId;
+      claim.className = 'btn-claim-win';
+      claim.type = 'button';
+      claim.hidden = true;
+      claim.textContent = '🏁 Claim win';
+      button.parentElement?.insertBefore(claim, button);
+    }
+    return { definition, screen, button, claim };
   }).filter(Boolean);
 
+  // ✕ is for everyone now: the host ends the room, anyone else leaves their
+  // seat (presence dropped, seat kept) so the table can skip them.
   const syncVisibility = () => {
     controls.forEach(({ definition, screen, button }) => {
       const current = activeGameId === definition.gameId ? runtime : null;
       button.hidden = screen.hidden
         || !current?.connected
-        || !current.isHost
         || !isActiveGameState(definition.gameId, current.currentState);
     });
+    refreshClaimButtons();
   };
   syncEndGameControlVisibility = syncVisibility;
 
-  controls.forEach(({ definition, screen, button }) => {
+  controls.forEach(({ definition, screen, button, claim }) => {
     button.addEventListener('click', async () => {
       if (button.disabled) return;
       const current = runtime;
       if (activeGameId !== definition.gameId
         || !current?.connected
-        || !current.isHost
         || !isActiveGameState(definition.gameId, current.currentState)) {
         syncVisibility();
         return;
       }
-      const confirmed = await showConfirm('End this game for everyone?', {
-        confirmText: 'End game',
-        cancelText: 'Keep playing',
-      });
+      const confirmed = current.isHost
+        ? await showConfirm('End this game for everyone?', { confirmText: 'End game', cancelText: 'Keep playing' })
+        : await showConfirm('Leave the game? The others keep playing; your turns will be skipped.', { confirmText: 'Leave', cancelText: 'Keep playing' });
       if (!confirmed) return;
 
       button.disabled = true;
       try {
-        await current.leaveRoom({ deleteIfHost: true });
-        showToast('Game ended.', 2000);
+        if (current.isHost) {
+          await current.leaveRoom({ deleteIfHost: true });
+          showToast('Game ended.', 2000);
+        } else {
+          await current.leaveSeat();
+        }
       } catch (error) {
-        console.error(`[CardGamesMP:${definition.gameId}] End game failed`, error);
+        console.error(`[CardGamesMP:${definition.gameId}] Leave game failed`, error);
         showToast(errorMessage(error), 3000);
       } finally {
         button.disabled = false;
         requestAnimationFrame(syncVisibility);
+      }
+    });
+
+    claim.addEventListener('click', async () => {
+      if (claim.disabled || activeGameId !== definition.gameId || !runtime?.connected || !othersAllOffline()) {
+        refreshClaimButtons();
+        return;
+      }
+      claim.disabled = true;
+      try {
+        await runtime.claimWin();
+      } catch (error) {
+        console.error(`[CardGamesMP:${definition.gameId}] Claim failed`, error);
+        showToast('Could not claim the win right now.', 3000);
+      } finally {
+        claim.disabled = false;
+        refreshClaimButtons();
       }
     });
 

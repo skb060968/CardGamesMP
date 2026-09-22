@@ -182,6 +182,40 @@ export function checkWinCondition(state) {
   return { finished: false, winnerIndex: null, draw: false };
 }
 
+/* ======= STANDARD OUT-OF-TURN MOVES (offline watchdog + claim) ======= */
+
+/**
+ * Watchdog skip: the offline current player auto-throws their top card (the
+ * same card a tap would throw), then the usual win check / turn advance runs.
+ * A player who somehow has no cards is simply passed over. Pure and
+ * deterministic — every client and the validator reproduce it exactly.
+ * @param {object} state - GameState (status 'playing')
+ * @returns {object} next GameState (revision untouched)
+ */
+export function skipTurn(state) {
+  if (state.status !== 'playing') throw new Error('Game is not active');
+  const player = state.players[state.currentPlayerIndex];
+  if (!player || player.eliminated || player.hand.length === 0) return advanceTurn(state);
+  const { newState } = throwCard(state, 0);
+  const win = checkWinCondition(newState);
+  return win.finished
+    ? { ...newState, status: 'finished', winnerIndex: win.winnerIndex }
+    : advanceTurn(newState);
+}
+
+/**
+ * Claim: everyone else is offline, the actor takes the round. Cards stay where
+ * they are so the integrity check still holds.
+ * @param {object} state - GameState (status 'playing')
+ * @param {number} actorIndex - game seat of the claimant
+ * @returns {object} finished GameState (revision untouched)
+ */
+export function claimWin(state, actorIndex) {
+  if (state.status !== 'playing') throw new Error('Game is not active');
+  if (!state.players[actorIndex]) throw new RangeError('Invalid actorIndex');
+  return { ...state, status: 'finished', winnerIndex: actorIndex };
+}
+
 /**
  * Validates state integrity: total cards across all hands + pile + all bounties === deckSize.
  * @param {object} state - GameState

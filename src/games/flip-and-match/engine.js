@@ -138,6 +138,31 @@ export function flipCard(state, cardIndex, playerIndex) {
   };
 }
 
+/* ======= STANDARD OUT-OF-TURN MOVES (offline watchdog + claim) ======= */
+
+/**
+ * Watchdog skip: the offline current player forfeits their flip and the turn
+ * passes. No card is turned — an auto-flip would leak board information.
+ * @param {object} state
+ * @returns {object} next state (revision untouched)
+ */
+export function skipTurn(state) {
+  if (state.status !== 'playing') throw new Error('Game is not active');
+  return { ...state, currentPlayerIndex: (state.currentPlayerIndex + 1) % state.players.length };
+}
+
+/**
+ * Claim: everyone else is offline, the actor takes the round with the board as is.
+ * @param {object} state
+ * @param {number} actorIndex
+ * @returns {object} finished state (revision untouched)
+ */
+export function claimWin(state, actorIndex) {
+  if (state.status !== 'playing') throw new Error('Game is not active');
+  if (!state.players[actorIndex]) throw new RangeError('Invalid actorIndex');
+  return { ...state, status: 'finished', winnerIndex: actorIndex, isTie: false, tiedIndices: null };
+}
+
 /* ======= GAME END DETECTION ======= */
 
 /**

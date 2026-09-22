@@ -140,7 +140,19 @@ function cleanPlayerData(player) {
   delete copy.slotId;
   delete copy.isHost;
   delete copy.joinedAt;
+  delete copy.presenceKey;
   return copy;
+}
+
+/**
+ * Seats a game state can be skipped for / claimed against: every entry of
+ * `playerSlots` except `exceptIndex`, mapped to `{ index, slot, uid }`.
+ */
+function seatedOpponents(currentRoom, currentState, exceptIndex) {
+  const slots = Array.isArray(currentState?.playerSlots) ? currentState.playerSlots : [];
+  return slots
+    .map((slot, index) => ({ index, slot, uid: currentRoom.players?.[slot]?.uid }))
+    .filter((seat) => seat.index !== exceptIndex);
 }
 
 function lifecycleError(error, operation) {
@@ -279,7 +291,15 @@ export function createFirebaseRoomStore({
       slotId: slotId(index),
       isHost,
       joinedAt,
+      // Lets the security rules look this seat up in `presence/` (the key is a
+      // hex-encoded uid, which rules cannot compute themselves).
+      presenceKey: uidPathKey(playerUid),
     };
+  }
+
+  /** Presence-derived connectivity for a raw (undecoded) room inside a transaction. */
+  function seatConnected(currentRoom, uid) {
+    return isPlayerConnected(currentRoom, uid);
   }
 
   async function createRoom({
@@ -416,6 +436,7 @@ export function createFirebaseRoomStore({
             slotId: key,
             isHost: false,
             joinedAt,
+            presenceKey: uidPathKey(playerUid),
           };
           return players;
         }
@@ -603,6 +624,35 @@ export function createFirebaseRoomStore({
   }
 
   /**
+   * True when the host is offline and this uid owns the lowest-numbered
+   * connected seat — the seat that inherits host powers (Play Again, end game).
+   */
+  function canActForOfflineHost(currentRoom) {
+    const hostUid = currentRoom?.meta?.hostUid;
+    if (!hostUid || seatConnected(currentRoom, hostUid)) return false;
+    for (let index = 0; index < SLOT_COUNT; index += 1) {
+      const seat = currentRoom.players?.[slotId(index)];
+      if (!seat?.uid || !seatConnected(currentRoom, seat.uid)) continue;
+      return seat.uid === playerUid;
+    }
+    return false;
+  }
+
+  /**
+   * Leave a running round without giving up the seat (standard `markSelfOffline`):
+   * removes every presence entry this uid owns so the others see the seat go
+   * OFF and the watchdog skips it. The player can still be dealt back in after
+   * a Play Again because their seat survives.
+   */
+  async function markSelfOffline() {
+    try {
+      await writeValue(childRef(`presence/${uidPathKey(playerUid)}`), null);
+    } catch (error) {
+      throw lifecycleError(error, 'mark-self-offline');
+    }
+  }
+
+  /**
    * Standard reconnect hook: fires `onRestore` once each time the RTDB socket
    * comes back after having been down. The first `.info/connected` emission is
    * the baseline and never fires. Returns an unsubscribe function.
@@ -776,8 +826,12 @@ export function createFirebaseRoomStore({
         rejectionCode = 'transaction-aborted';
         if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
         if (currentRoom.meta?.hostUid !== playerUid) {
-          rejectionCode = 'host-identity-mismatch';
-          return undefined;
+          // Host-loss inheritance (standard): when the host has dropped, the first
+          // connected seat may reset the room. Mirrors the rules' host-offline branch.
+          if (!canActForOfflineHost(currentRoom)) {
+            rejectionCode = 'host-identity-mismatch';
+            return undefined;
+          }
         }
         if (safeRoster !== null) {
           const currentRoster = {};
@@ -1701,6 +1755,120 @@ export function createFirebaseRoomStore({
     }
   }
 
+  /**
+   * Shared body for the two standard out-of-turn moves. Unlike the game moves
+   * the writer is `actorIndex` (a connected seat) and the state change concerns
+   * other, offline seats. The presence check runs inside the transaction on the
+   * same snapshot the state is validated against.
+   *
+   *  - `skip-turn`  target = currentPlayerIndex, must be offline (and not the actor)
+   *  - `claim-win`  every seat other than the actor must be offline
+   */
+  async function commitOutOfTurn({ type, moveId, expectedRevision, actorIndex, state }) {
+    try {
+      requireToken(moveId, 'moveId');
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+        throw new TypeError('expectedRevision must be a non-negative safe integer');
+      }
+      if (!Number.isInteger(actorIndex) || actorIndex < 0 || actorIndex >= maxPlayers) {
+        throw new TypeError(`actorIndex must be an integer from 0 through ${maxPlayers - 1}`);
+      }
+      const safeState = cloneFirebaseValue(state, 'state');
+      const encodedNextState = encodeGame(safeState);
+      const nextState = decodeState(encodedNextState);
+      if (nextState.revision !== expectedRevision + 1) {
+        throw new RoomCommitError('invalid-next-revision');
+      }
+      const commitTime = now();
+      let rejectionCode = 'transaction-aborted';
+      let idempotent = false;
+      let targetIndex = -1;
+      const result = await transactExistingRoom(`commit-${type}`, (currentRoom) => {
+        rejectionCode = 'transaction-aborted';
+        idempotent = false;
+        if (!currentRoom) { rejectionCode = 'room-not-found'; return undefined; }
+
+        const previousMove = currentRoom.lastMove;
+        if (previousMove?.id === moveId) {
+          const sameMove = previousMove.type === type
+            && previousMove.expectedRevision === expectedRevision
+            && previousMove.actorIndex === actorIndex
+            && sameValue(currentRoom.game, encodedNextState);
+          if (!sameMove) { rejectionCode = 'move-id-collision'; return undefined; }
+          idempotent = true;
+          return currentRoom;
+        }
+        if (currentRoom.meta?.status !== 'active') { rejectionCode = 'room-not-active'; return undefined; }
+
+        let currentState;
+        try { currentState = decodeState(currentRoom.game); }
+        catch (_) { rejectionCode = 'invalid-current-state'; return undefined; }
+
+        // The actor must own a seated, connected slot; slot maps must be unchanged.
+        rejectionCode = commitSlotRejection(currentRoom, currentState, nextState, actorIndex);
+        if (rejectionCode) return undefined;
+        if (!seatConnected(currentRoom, playerUid)) { rejectionCode = 'actor-offline'; return undefined; }
+        if (currentState?.revision !== expectedRevision) { rejectionCode = 'revision-conflict'; return undefined; }
+
+        const others = seatedOpponents(currentRoom, currentState, actorIndex);
+        if (type === 'skip-turn') {
+          targetIndex = currentState.currentPlayerIndex;
+          const target = others.find((seat) => seat.index === targetIndex);
+          if (!target) { rejectionCode = 'target-is-actor'; return undefined; }
+          if (!target.uid || seatConnected(currentRoom, target.uid)) { rejectionCode = 'target-online'; return undefined; }
+        } else {
+          targetIndex = actorIndex;
+          if (!others.length) { rejectionCode = 'no-opponents'; return undefined; }
+          if (others.some((seat) => seat.uid && seatConnected(currentRoom, seat.uid))) {
+            rejectionCode = 'opponents-online';
+            return undefined;
+          }
+        }
+
+        const action = { type, moveId, expectedRevision, playerIndex: targetIndex, actorIndex };
+        let verdict;
+        try { verdict = readVerdict(validateTransition({ currentState, nextState, action })); }
+        catch (_) { verdict = { valid: false, reason: 'transition-validator-failed' }; }
+        if (!verdict.valid) { rejectionCode = verdict.reason; return undefined; }
+
+        return {
+          ...currentRoom,
+          game: encodedNextState,
+          lastMove: {
+            id: moveId,
+            type,
+            expectedRevision,
+            revision: nextState.revision,
+            playerIndex: targetIndex,
+            actorIndex,
+            createdAt: commitTime,
+          },
+          meta: { ...currentRoom.meta, status: 'active', lastActivity: commitTime },
+        };
+      });
+      if (!result.committed) {
+        throw new RoomCommitError(rejectionCode, `${type} commit rejected: ${rejectionCode}`);
+      }
+      const committedRoom = result.snapshot.val();
+      if (!committedRoom?.game) throw new RoomCommitError('missing-committed-state');
+      return { state: decodeState(committedRoom.game), move: committedRoom.lastMove, idempotent };
+    } catch (error) {
+      throw commitError(error, `${type} commit`);
+    }
+  }
+
+  /** Watchdog: a connected seat advances the game past the offline current player. */
+  function commitSkip(payload = {}) {
+    requireObject(payload, 'skip commit payload');
+    return commitOutOfTurn({ ...payload, type: 'skip-turn' });
+  }
+
+  /** Everyone else is offline: the last connected seat ends the round as winner. */
+  function commitClaim(payload = {}) {
+    requireObject(payload, 'claim commit payload');
+    return commitOutOfTurn({ ...payload, type: 'claim-win' });
+  }
+
   return Object.freeze({
     get path() { return roomPath(); },
     get roomCode() { return selectedRoomCode; },
@@ -1712,6 +1880,8 @@ export function createFirebaseRoomStore({
     subscribeRoom,
     startPresence,
     watchReconnect,
+    markSelfOffline,
+    canActForOfflineHost,
     leaveRoom,
     removePlayer,
     deleteRoom,
@@ -1722,5 +1892,7 @@ export function createFirebaseRoomStore({
     commitDiscard,
     commitPokerAction,
     commitBluffAction,
+    commitSkip,
+    commitClaim,
   });
 }

@@ -5,6 +5,8 @@ import { createFirebaseRoomStore, isPlayerConnected } from '../../data/firebase-
 import { createGameSessionStore } from '../../platform/session-storage.js';
 import { createPatteParPattaThrowAction } from './throw-action.js';
 import { createPatteParPattaThrowTransitionValidator } from './throw-transition.js';
+import { createOutOfTurnTransitionValidator } from '../../shared/out-of-turn-transition.js';
+import { createOutOfTurnMoves } from '../../shared/out-of-turn-moves.js';
 
 const GAME_ID = 'patte-par-patta';
 const MAX_PLAYERS = 4;
@@ -61,7 +63,13 @@ export function createPatteParPattaRuntime({
   requireFunction(codeGenerator, 'codeGenerator');
 
   const sessions = createGameSessionStore(GAME_ID, storage);
+  // Standard out-of-turn moves (skip / claim) are validated first; a null verdict
+  // means "not mine", and the game's own throw validator takes over.
+  const validateOutOfTurn = createOutOfTurnTransitionValidator(rules);
+  const validateThrow = createPatteParPattaThrowTransitionValidator(rules);
+  const validateTransition = (parameters) => validateOutOfTurn(parameters) ?? validateThrow(parameters);
   let state = null;
+  let lastMove = null;
   let store = null;
   let roomSlotIndex = -1;
   let gamePlayerIndex = -1;
@@ -152,7 +160,7 @@ export function createPatteParPattaRuntime({
     maxPlayers: MAX_PLAYERS,
     decodeState: decodeGameState,
     generateRoomCode: codeGenerator,
-    validateTransition: createPatteParPattaThrowTransitionValidator(rules),
+    validateTransition,
   });
 
 
@@ -194,6 +202,7 @@ export function createPatteParPattaRuntime({
       return;
     }
     updateIdentity(room);
+    lastMove = room.lastMove ?? null;
     if (room.meta?.status === 'active' && room.game) {
       if (move?.id) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
@@ -341,7 +350,10 @@ export function createPatteParPattaRuntime({
   async function returnToLobby() {
     ensureConnected();
     const room = await store.readRoom();
-    if (room.meta?.hostUid !== uid) throw new Error('Only the host can start another round');
+    // Host, or (host-loss inheritance) the first connected seat while the host is offline.
+    if (room.meta?.hostUid !== uid && !store.canActForOfflineHost(room)) {
+      throw new Error('Only the host can start another round');
+    }
     if (room.game?.status !== 'finished') throw new Error('The current round is not finished');
     const updated = await store.resetRoom({ state: waitingState(), status: 'waiting' });
     state = updated.game;
@@ -350,6 +362,30 @@ export function createPatteParPattaRuntime({
     return updated;
   }
 
+  // Standard out-of-turn moves: watchdog skip + last-player claim.
+  const outOfTurn = createOutOfTurnMoves({
+    rules,
+    getStore: () => store,
+    getState: () => state,
+    getActorIndex: () => gamePlayerIndex,
+    afterCommit: () => enqueue(() => refreshRoom()),
+  });
+
+  /**
+   * Leave a running round without giving up the seat (standard): presence is
+   * dropped so the others see the seat go OFF and the watchdog skips it; the
+   * room survives and the seat can be dealt back in after a Play Again.
+   */
+  async function leaveSeat() {
+    ensureConnected();
+    const activeStore = store;
+    await disconnectLocal();
+    try { await activeStore.markSelfOffline(); } catch (error) { reportError(error); }
+    sessions.clear();
+    disposed = true;
+    coordinator.dispose();
+    callbacks.onDisconnected?.({ deleted: false, leftSeat: true });
+  }
 
   async function removeLobbyPlayer({ playerIndex, expectedUid }) {
     ensureConnected();
@@ -405,11 +441,16 @@ export function createPatteParPattaRuntime({
     playAgain: returnToLobby,
     removePlayer: removeLobbyPlayer,
     throwCard: throwLocalCard,
+    skipStalledTurn: outOfTurn.skipStalledTurn,
+    claimWin: outOfTurn.claimWin,
+    leaveSeat,
+    canActForOfflineHost: (room) => Boolean(store?.canActForOfflineHost(room)),
     leaveRoom,
     close,
     refresh: () => refreshRoom(),
     get roomCode() { return store?.roomCode || null; },
     get currentState() { return state; },
+    get lastMove() { return lastMove; },
     get playerSlotIndex() { return roomSlotIndex; },
     get playerIndex() { return gamePlayerIndex; },
     get isHost() { return host; },
