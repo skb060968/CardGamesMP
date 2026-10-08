@@ -1986,7 +1986,20 @@ body {
   opacity: 0.3;
 }
 
+/* Fixed-footprint stack: layers are absolutely positioned, so adding cards (more layers,
+   capped at 3) never changes the width — the opponents row stays on one line. */
+.fm-deck-stack {
+  position: relative;
+  width: 18px;        /* card width (14) + room for the 2 depth offsets (2px each) */
+  height: 22px;
+  flex-shrink: 0;
+}
+
 .fm-mini-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(calc(var(--layer, 0) * 2px), calc(var(--layer, 0) * -2px));
   width: 14px;
   height: 20px;
   border-radius: 2px;
@@ -2000,13 +2013,8 @@ body {
       rgba(255,255,255,0.06) 3px
     ),
     radial-gradient(ellipse at center, #8b1a2b 0%, #4a0e1a 100%);
-  margin-left: -6px;
   flex-shrink: 0;
   box-shadow: 1px 1px 2px rgba(0,0,0,0.3);
-}
-
-.fm-mini-card:first-child {
-  margin-left: 0;
 }
 
 .fm-won-badge {
@@ -2241,6 +2249,7 @@ body {
     max-width: 90px;
   }
 
+  .fm-deck-stack { width: 20px; height: 24px; }
   .fm-mini-card {
     width: 16px;
     height: 22px;
@@ -2266,6 +2275,7 @@ body {
     min-width: 100px;
   }
 
+  .fm-deck-stack { width: 22px; height: 26px; }
   .fm-mini-card {
     width: 18px;
     height: 24px;

@@ -133,25 +133,26 @@ function renderSelfBlock(container, players, currentPlayerIndex, localPlayerInde
 function buildWonCardsDeck(count) {
   const deck = document.createElement('div');
   deck.className = 'fm-won-deck';
+  if (count === 0) deck.classList.add('fm-won-deck-empty');
 
-  if (count === 0) {
-    deck.classList.add('fm-won-deck-empty');
-    return deck;
-  }
-
-  const visible = Math.min(count, 6);
-  for (let i = 0; i < visible; i++) {
+  // Fixed-width stacked pile (not a strip that widens per card): a few tightly layered
+  // backs for depth, so the player block never changes width as cards are captured and
+  // the opponents row never wraps. The real total is the badge.
+  const stack = document.createElement('div');
+  stack.className = 'fm-deck-stack';
+  const layers = Math.min(Math.max(count, 1), 3);          // 1–3 depth layers only
+  for (let i = 0; i < layers; i += 1) {
     const mini = document.createElement('div');
     mini.className = 'fm-mini-card';
-    deck.appendChild(mini);
+    mini.style.setProperty('--layer', String(i));
+    stack.appendChild(mini);
   }
+  deck.appendChild(stack);
 
-  if (count > 0) {
-    const badge = document.createElement('span');
-    badge.className = 'fm-won-badge';
-    badge.textContent = String(count);
-    deck.appendChild(badge);
-  }
+  const badge = document.createElement('span');
+  badge.className = 'fm-won-badge';
+  badge.textContent = String(count);
+  deck.appendChild(badge);
 
   return deck;
 }

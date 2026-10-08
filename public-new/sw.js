@@ -1,7 +1,7 @@
 /* CardGamesMP service worker — deliberate updates, safe fallbacks.
  * BUMP CACHE_VERSION on every deploy so clients get the update prompt. */
 const CACHE_PREFIX = 'cardgamesmp-app-';
-const CACHE_VERSION = 'v59';
+const CACHE_VERSION = 'v60';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 
 // App shell + small static media. Hashed Vite bundles are picked up on first
