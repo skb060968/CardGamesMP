@@ -8,6 +8,56 @@
 
 const MUTE_KEY = 'card_games_muted';
 
+/**
+ * English voice selection.
+ *
+ * The Web Speech API can only use voices from the TTS engine the device has selected in
+ * system settings; it cannot switch engines (e.g. force Google over Samsung). What it CAN
+ * do is pick the best voice among those the engine exposes, instead of letting the OS fall
+ * back to its default — which on many phones is a low-quality "compact" voice, or a
+ * wrong-locale one. We prefer Google / neural voices, English (India) then (US/UK/any),
+ * and avoid the "compact"/"eloquence" voices that mispronounce words.
+ */
+const EN_LANG = 'en-IN';           // preferred spoken locale for the English announcements
+let _enVoice = null;
+
+function _scoreVoice(v) {
+  const n = (v.name || '').toLowerCase();
+  const lang = (v.lang || '').replace('_', '-').toLowerCase();
+  if (!/^en-/.test(lang)) return -100;                 // English only
+  let s = 0;
+  if (/compact|eloquence/.test(n)) s -= 50;            // the robotic ones
+  if (/natural|neural/.test(n)) s += 6;                // Microsoft/Edge "Natural"
+  if (/google/.test(n)) s += 5;                        // Google TTS neural
+  if (/siri|enhanced|premium/.test(n)) s += 5;         // Apple enhanced
+  if (!v.localService) s += 3;                         // network/cloud voice
+  if (lang === 'en-in') s += 3;                        // match our preferred locale
+  else if (lang === 'en-us' || lang === 'en-gb') s += 1;
+  return s;
+}
+
+function pickEnglishVoice() {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+  const voices = speechSynthesis.getVoices();
+  if (!voices || !voices.length) return null;
+  let best = null, bestScore = -Infinity;
+  for (const v of voices) {
+    const s = _scoreVoice(v);
+    if (s > bestScore) { bestScore = s; best = v; }
+  }
+  return bestScore > -100 ? best : null;
+}
+
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  // getVoices() is empty until the list loads asynchronously; refresh on voiceschanged.
+  _enVoice = pickEnglishVoice();
+  try {
+    speechSynthesis.addEventListener('voiceschanged', () => { _enVoice = pickEnglishVoice(); });
+  } catch (_) {
+    speechSynthesis.onvoiceschanged = () => { _enVoice = pickEnglishVoice(); };
+  }
+}
+
 // Keeps mute functional for the current session if localStorage is unavailable.
 let _mutedFallback = false;
 let _useMuteFallback = false;
@@ -81,7 +131,15 @@ function speak(text, lang) {
         if (speechSynthesis.paused) speechSynthesis.resume();
         speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
-        if (lang) utterance.lang = lang;
+        if (lang) {
+          utterance.lang = lang;                       // caller-specified (e.g. Bluff's hi-IN) wins
+        } else {
+          // English announcements: force a sensible locale and the best voice we found,
+          // rather than the device default which is often the compact/mispronouncing one.
+          if (!_enVoice) _enVoice = pickEnglishVoice();
+          if (_enVoice) utterance.voice = _enVoice;
+          utterance.lang = (_enVoice && _enVoice.lang) || EN_LANG;
+        }
         utterance.rate = 0.95;
         utterance.pitch = 1.0;
         utterance.volume = 1.0;
