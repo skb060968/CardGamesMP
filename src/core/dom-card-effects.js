@@ -105,26 +105,67 @@ export async function animateElementSweep({ element, targetRect, duration = 1200
 
 export async function animateCardReveal({
   element,
-  className = 'fm-flipping',
-  duration = 150,
+  // className kept for API compatibility but the multi-phase implementation
+  // uses dedicated classes and ignores this parameter.
+  className = 'fm-flipping', // eslint-disable-line no-unused-vars
   reveal = () => {},
   signal,
 }) {
   if (typeof reveal !== 'function') throw new TypeError('reveal must be a function');
   throwIfAborted(signal);
+
   if (!element || prefersReducedMotion()) {
     await reveal();
     throwIfAborted(signal);
     return;
   }
 
-  element.classList.add(className);
+  // ── Phase 0: press-down feedback (one frame, ~70ms) ──────────────────
+  element.classList.add('fm-pressing');
   try {
-    await delay(Math.floor(duration / 2), signal);
-    await reveal();
-    await delay(Math.ceil(duration / 2), signal);
+    await delay(70, signal);
   } finally {
-    element.classList.remove(className);
+    element.classList.remove('fm-pressing');
+  }
+
+  // ── Phase 1: fold away — back rotates to 90° (edge-on) ───────────────
+  element.classList.add('fm-folding');
+  try {
+    await delay(180, signal);
+  } finally {
+    element.classList.remove('fm-folding');
+  }
+
+  // ── DOM swap at edge-on — card-back element is replaced by card-face ──
+  // After reveal() the `element` reference is stale (the old back-card node
+  // is removed from the DOM). We immediately query the replacement face card
+  // so we can apply the unfold animation to the live element.
+  await reveal();
+  throwIfAborted(signal);
+
+  // The reveal() callback re-renders the grid cell via renderGameplay().
+  // The new face card lives at the same [data-card-index] cell.
+  const cell = element.closest('[data-card-index]');
+  const faceCard = cell?.querySelector('.fm-grid-card') ?? null;
+
+  // ── Phase 2: unfold with overshoot bounce ─────────────────────────────
+  if (faceCard) {
+    faceCard.classList.add('fm-unfolding');
+    // Kick off the reveal glow in parallel — it runs for 550ms but we only
+    // need to wait for the unfold (280ms) before the action is considered done.
+    faceCard.classList.add('fm-reveal-glow');
+    try {
+      await delay(280, signal);
+    } finally {
+      faceCard.classList.remove('fm-unfolding');
+    }
+    // Glow animation finishes on its own (550ms total); clean up afterward
+    // without blocking the rest of the game flow.
+    delay(300, signal).then(() => {
+      faceCard.classList.remove('fm-reveal-glow');
+    }).catch(() => {
+      faceCard.classList.remove('fm-reveal-glow');
+    });
   }
 }
 

@@ -2169,6 +2169,12 @@ body {
   box-shadow: 0 0 4px rgba(243,156,18,0.3);
 }
 
+/* Restore active scale for tappable cards (overrides the generic no-transform rule) */
+.fm-tappable .fm-grid-card:active {
+  transform: scale(0.92);
+  transition: transform 0.07s ease-in;
+}
+
 /* Collected slot — empty with reduced opacity */
 .fm-collected {
   opacity: 0.15;
@@ -2176,18 +2182,54 @@ body {
   border-radius: var(--card-radius);
 }
 
-/* --- Card flip animation (on click) --- */
-@keyframes fm-card-flip {
-  0% {
-    transform: rotateY(0deg);
-  }
-  100% {
-    transform: rotateY(90deg);
-  }
+/* --- Card flip animation — Phase 1: fold away (face-down → edge-on) --- */
+@keyframes fm-card-fold {
+  0%   { transform: rotateY(0deg) scale(1); }
+  60%  { transform: rotateY(60deg) scale(0.96); }
+  100% { transform: rotateY(90deg) scale(0.94); }
 }
 
-.fm-grid-card.fm-flipping {
-  animation: fm-card-flip 0.15s ease-in forwards;
+.fm-grid-card.fm-folding {
+  animation: fm-card-fold 0.18s cubic-bezier(0.4, 0, 0.8, 0.6) forwards;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+/* --- Card flip animation — Phase 2: unfold reveal (edge-on → face-up) with bounce --- */
+@keyframes fm-card-unfold {
+  0%   { transform: rotateY(90deg) scale(0.94); }
+  55%  { transform: rotateY(-6deg) scale(1.07); }
+  78%  { transform: rotateY(3deg)  scale(1.03); }
+  100% { transform: rotateY(0deg)  scale(1); }
+}
+
+.fm-grid-card.fm-unfolding {
+  animation: fm-card-unfold 0.28s cubic-bezier(0.2, 0.8, 0.3, 1.0) forwards;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+/* --- Reveal glow: white-gold radial flash that fades after the card unfolds --- */
+@keyframes fm-reveal-glow {
+  0%   { box-shadow: 0 0 0px rgba(255,240,180,0), 0 0 0px rgba(243,156,18,0); }
+  25%  { box-shadow: 0 0 14px rgba(255,240,180,0.95), 0 0 28px rgba(243,156,18,0.6); }
+  100% { box-shadow: 0 0 4px rgba(255,240,180,0),    0 0 0px rgba(243,156,18,0); }
+}
+
+.fm-grid-card.fm-reveal-glow {
+  animation: fm-reveal-glow 0.55s ease-out forwards;
+  z-index: 10;
+  position: relative;
+}
+
+/* Press-down feedback on tap before the flip starts */
+@keyframes fm-card-press {
+  0%   { transform: scale(1); }
+  100% { transform: scale(0.91); }
+}
+
+.fm-grid-card.fm-pressing {
+  animation: fm-card-press 0.07s ease-in forwards;
   transform-style: preserve-3d;
 }
 
