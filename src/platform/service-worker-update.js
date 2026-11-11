@@ -1,4 +1,5 @@
 const CONTROLLER_CHANGE_FALLBACK_MS = 5000;
+const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 export async function createServiceWorkerUpdateClient(options = {}) {
   if (!('serviceWorker' in navigator)) return null;
@@ -18,6 +19,10 @@ export async function createServiceWorkerUpdateClient(options = {}) {
     worker?.addEventListener('statechange', () => announce(worker), { signal });
   };
   registration.addEventListener('updatefound', onUpdateFound, { signal });
+  // Platform standard: check for a new worker every 5 minutes.
+  const updateTimer = setInterval(() => {
+    Promise.resolve().then(() => registration.update()).catch(() => {});
+  }, UPDATE_CHECK_INTERVAL_MS);
 
   async function applyUpdate({ reload = true } = {}) {
     waiting = registration.waiting || waiting;
@@ -35,6 +40,7 @@ export async function createServiceWorkerUpdateClient(options = {}) {
 
   function dispose() {
     disposed = true;
+    clearInterval(updateTimer);
     registration.removeEventListener('updatefound', onUpdateFound);
   }
   signal?.addEventListener('abort', dispose, { once: true });
