@@ -10,7 +10,8 @@
  *   1. Place an empty container in the game screen, e.g. <div id="voice-widget"></div>
  *   2. mountVoiceChat({
  *        mount: '#voice-widget',
- *        game: 'cardsmp',                 // per-game id (namespaces the LiveKit room)
+ *        game: 'cardsmp',                 // app voice prefix (the token API only accepts this)
+ *        getGameId: () => gameId,         // registry id of the active game (room tree for the seat check)
  *        getRoomCode: () => roomCode,     // current 4-letter code
  *        getIdentity: () => `player_${playerIndex}`,
  *        getDisplayName: () => playerName,
@@ -59,7 +60,7 @@ function injectStyles() {
 
 export function mountVoiceChat(config = {}) {
   const {
-    mount, game, getRoomCode, getIdentity, getDisplayName,
+    mount, game, getGameId, getRoomCode, getIdentity, getDisplayName,
     getIdToken, onSpeakers, notify,
   } = config;
   const container = typeof mount === 'string' ? document.querySelector(mount) : mount;
@@ -95,9 +96,11 @@ export function mountVoiceChat(config = {}) {
     if (voice) return voice;
     const roomCode = getRoomCode?.();
     const identity = getIdentity?.();
-    if (!roomCode || !identity) return null;
+    const gameId = getGameId?.();
+    if (!roomCode || !identity || !gameId) return null;
     voice = createLiveKitVoice({
       game,
+      gameId,
       roomCode,
       identity,
       displayName: getDisplayName?.() || identity,

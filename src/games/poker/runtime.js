@@ -1,5 +1,6 @@
 import { createActionCoordinator } from '../../core/action-coordinator.js';
 import { firebaseArray } from '../../core/firebase-array.js';
+import { createRemoteGate } from '../../core/remote-gate.js';
 import { generateRoomCode, normalizeRoomCode } from '../../core/room-code.js';
 import { createFirebaseRoomStore, isPlayerConnected } from '../../data/firebase-room-store.js';
 import { createGameSessionStore } from '../../platform/session-storage.js';
@@ -99,6 +100,10 @@ export function createPokerRuntime({
   let rosterRefreshQueued = false;
 
   const reportError = (error) => callbacks.onError?.(error);
+  const gate = createRemoteGate({
+    verify: (input) => (store?.verifyRemoteTransition ? store.verifyRemoteTransition(input) : { valid: true }),
+    onInvalid: (details) => callbacks.onInvalidRemote?.(details),
+  });
 
   const updateIdentity = (room) => {
     host = room?.meta?.hostUid === uid;
@@ -131,6 +136,7 @@ export function createPokerRuntime({
     applyRemote: async ({ room, move }, { signal }) => {
       const incoming = room?.game;
       if (!incoming || (state && incoming.revision <= state.revision)) return;
+      if (!gate.allow(state, room)) return;
       const previous = state;
       const exactlyNext = previous && incoming.revision === previous.revision + 1;
       try {
@@ -149,6 +155,7 @@ export function createPokerRuntime({
         reportError(error);
       } finally {
         state = incoming;
+        gate.adopt(room);
         updateIdentity(room);
         try { await renderState({ state, move }); }
         finally { callbacks.onState?.(state, { remote: true, move }); }
@@ -259,8 +266,9 @@ export function createPokerRuntime({
       const exactlyNext = state && incoming.revision === state.revision + 1;
       if (!forceSnapshot && move?.id && exactlyNext) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
-      } else {
+      } else if (gate.allow(state, room)) {
         state = incoming;
+        gate.adopt(room);
         try { await renderState({ state, move: null }); }
         finally {
           callbacks.onState?.(state, {
@@ -271,7 +279,9 @@ export function createPokerRuntime({
       callbacks.onPresence?.({ room, state });
       return;
     }
+    if (!gate.allow(state, room)) { callbacks.onPresence?.({ room, state }); return; }
     state = room.game;
+    gate.adopt(room);
     callbacks.onLobby?.({ room, roomCode: store.roomCode, isHost: host, roomSlotIndex });
   }
 
@@ -280,6 +290,7 @@ export function createPokerRuntime({
     store = activeStore;
     roomSlotIndex = playerIndex;
     state = room.game;
+    gate.adopt(room);
     updateIdentity(room);
     requireFunction(activeStore.commitPokerAction, 'store.commitPokerAction');
     commitPoker = activeStore.commitPokerAction.bind(activeStore);
@@ -420,6 +431,7 @@ export function createPokerRuntime({
       expectedRoster: roster,
     });
     state = updated.game;
+    gate.adopt(updated);
     updateIdentity(updated);
     if (chipsReset) callbacks.onChipsReset?.();
     await renderState({ state });
@@ -460,6 +472,7 @@ export function createPokerRuntime({
     if (Object.keys(balances).length) nextState.carriedChips = balances;
     const updated = await store.resetRoom({ state: nextState, status: 'waiting' });
     state = updated.game;
+    gate.adopt(updated);
     updateIdentity(updated);
     callbacks.onLobby?.({ room: updated, roomCode: store.roomCode, isHost: host, roomSlotIndex });
     return updated;
@@ -478,8 +491,10 @@ export function createPokerRuntime({
     try {
       const room = await store.readRoom();
       if (room?.meta?.status === 'active' && room.game
-        && (!state || room.game.revision >= state.revision)) {
+        && (!state || room.game.revision >= state.revision)
+        && gate.allow(state, room)) {
         state = room.game;
+        gate.adopt(room);
         updateIdentity(room);
       }
     } catch (error) {
@@ -572,5 +587,6 @@ export function createPokerRuntime({
     get isHost() { return host; },
     get connected() { return Boolean(store) && !disposed; },
     get busy() { return coordinator.busy; },
+    get halted() { return gate.halted; },
   });
 }

@@ -109,6 +109,8 @@ function initVoiceWidget() {
   voiceWidget = mountVoiceChat({
     mount: '#voice-widget',
     game: 'cardsmp',
+    // Which game's room tree the code belongs to; the token API checks the seat there.
+    getGameId: () => (runtime ? activeGameId : null),
     getRoomCode: () => runtime?.roomCode || null,
     // Room slot (stable for the whole stay in the room), not the per-round game
     // seat: seats shift between rounds and players sitting a round out have none.
@@ -514,7 +516,7 @@ function othersAllOffline() {
 
 function scheduleWatchdog() {
   const state = runtime?.currentState;
-  if (!runtime?.connected || !isActiveGameState(activeGameId, state) || runtime.playerIndex < 0) { clearWatchdog(); return; }
+  if (!runtime?.connected || runtime.halted || !isActiveGameState(activeGameId, state) || runtime.playerIndex < 0) { clearWatchdog(); return; }
   const cur = state.currentPlayerIndex;
   if (!seatOffline(cur)) { clearWatchdog(); return; }
   const key = `${state.revision}:${cur}`;
@@ -525,7 +527,7 @@ function scheduleWatchdog() {
   watchdogTimer = setTimeout(async () => {
     watchdogTimer = null;
     const latest = runtime?.currentState;
-    if (!runtime?.connected || !isActiveGameState(activeGameId, latest)) return;
+    if (!runtime?.connected || runtime.halted || !isActiveGameState(activeGameId, latest)) return;
     if (`${latest.revision}:${latest.currentPlayerIndex}` !== key || !seatOffline(cur)) return;
     try {
       await runtime.skipStalledTurn();
@@ -541,7 +543,7 @@ function refreshClaimButtons() {
     const button = element(claimId);
     if (!button) return;
     const mine = gameId === activeGameId;
-    button.hidden = !mine || !runtime?.connected
+    button.hidden = !mine || !runtime?.connected || runtime.halted
       || !isActiveGameState(gameId, runtime.currentState) || !othersAllOffline();
   });
 }
@@ -630,6 +632,25 @@ async function buildRuntime(gameId) {
       presenceRoom = room;
       syncSeatPresence();
       refreshStallGuards();
+    },
+    // A remote update failed the game's own move check: the runtime keeps the
+    // last good state and stops applying updates until a new round starts.
+    onInvalidRemote: async ({ reason } = {}) => {
+      if (runtime !== candidate) return;
+      console.warn(`[CardGamesMP:${gameId}] invalid remote move rejected:`, reason);
+      clearWatchdog();
+      refreshClaimButtons();
+      showToast('Invalid move received — game stopped', 4000);
+      const leave = await showConfirm('Invalid move received — game stopped. Leave this room?', {
+        confirmText: 'Leave', cancelText: 'Stay',
+      });
+      if (!leave || runtime !== candidate) return;
+      try {
+        await leaveCurrentRoom();
+      } catch (error) {
+        console.error(`[CardGamesMP:${gameId}] Leave after invalid move failed`, error);
+        showToast(errorMessage(error), 3000);
+      }
     },
   };
 

@@ -2,6 +2,7 @@ import { createActionCoordinator } from '../../core/action-coordinator.js';
 import { ref as firebaseRef, runTransaction as firebaseRunTransaction } from 'firebase/database';
 
 import { firebaseArray } from '../../core/firebase-array.js';
+import { createRemoteGate } from '../../core/remote-gate.js';
 import { generateRoomCode, normalizeRoomCode } from '../../core/room-code.js';
 import { createFirebaseRoomStore, isPlayerConnected } from '../../data/firebase-room-store.js';
 import { createGameSessionStore } from '../../platform/session-storage.js';
@@ -122,6 +123,10 @@ export function createBluffRuntime({
   let commitBluff = null;
 
   const reportError = (error) => callbacks.onError?.(error);
+  const gate = createRemoteGate({
+    verify: (input) => (store?.verifyRemoteTransition ? store.verifyRemoteTransition(input) : { valid: true }),
+    onInvalid: (details) => callbacks.onInvalidRemote?.(details),
+  });
   const sameOrder = (left, right) => left.length === right.length
     && left.every((id, index) => id === right[index]);
   const loadOrder = (key) => {
@@ -222,6 +227,7 @@ export function createBluffRuntime({
     applyRemote: async ({ room, move }, { signal }) => {
       const incoming = room?.game;
       if (!incoming || (state && incoming.revision <= state.revision)) return;
+      if (!gate.allow(state, room)) return;
       const previous = state;
       const exactlyNext = previous && incoming.revision === previous.revision + 1;
       try {
@@ -241,6 +247,7 @@ export function createBluffRuntime({
         reportError(error);
       } finally {
         state = incoming;
+        gate.adopt(room);
         updateIdentity(room);
         try { await renderState({ state, move }); }
         finally { callbacks.onState?.(state, { remote: true, move }); }
@@ -436,8 +443,9 @@ export function createBluffRuntime({
       const exactlyNext = state && incoming.revision === state.revision + 1;
       if (!forceSnapshot && move?.id && exactlyNext) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
-      } else {
+      } else if (gate.allow(state, room)) {
         state = incoming;
+        gate.adopt(room);
         try { await renderState({ state, move: null }); }
         finally {
           callbacks.onState?.(state, {
@@ -448,7 +456,9 @@ export function createBluffRuntime({
       callbacks.onPresence?.({ room, state });
       return;
     }
+    if (!gate.allow(state, room)) { callbacks.onPresence?.({ room, state }); return; }
     state = room.game;
+    gate.adopt(room);
     callbacks.onLobby?.({ room, roomCode: store.roomCode, isHost: host, roomSlotIndex });
   }
   async function attach(activeStore, playerIndex, room) {
@@ -456,6 +466,7 @@ export function createBluffRuntime({
     store = activeStore;
     roomSlotIndex = playerIndex;
     state = room.game;
+    gate.adopt(room);
     updateIdentity(room);
     commitBluff = typeof activeStore.commitBluffAction === 'function'
       ? activeStore.commitBluffAction.bind(activeStore)
@@ -537,6 +548,7 @@ export function createBluffRuntime({
       state: nextState, status: 'active', expectedRoster: roster,
     });
     state = updated.game;
+    gate.adopt(updated);
     updateIdentity(updated);
     await renderState({ state });
     callbacks.onState?.(state, { remote: false, newRound: true });
@@ -554,6 +566,7 @@ export function createBluffRuntime({
     if (room.game?.status !== 'finished') throw new Error('The current round is not finished');
     const updated = await store.resetRoom({ state: waitingState(), status: 'waiting' });
     state = updated.game;
+    gate.adopt(updated);
     updateIdentity(updated);
     callbacks.onLobby?.({ room: updated, roomCode: store.roomCode, isHost: host, roomSlotIndex });
     return updated;
@@ -572,8 +585,10 @@ export function createBluffRuntime({
       const previousRevision = state?.revision;
       const room = await store.readRoom();
       if (room?.meta?.status === 'active' && room.game
-        && (!state || room.game.revision >= state.revision)) {
+        && (!state || room.game.revision >= state.revision)
+        && gate.allow(state, room)) {
         state = room.game;
+        gate.adopt(room);
         updateIdentity(room);
         shouldRender = !Number.isSafeInteger(previousRevision) || room.game.revision > previousRevision;
       }
@@ -653,5 +668,6 @@ export function createBluffRuntime({
     get isHost() { return host; },
     get connected() { return Boolean(store) && !disposed; },
     get busy() { return coordinator.busy; },
+    get halted() { return gate.halted; },
   });
 }

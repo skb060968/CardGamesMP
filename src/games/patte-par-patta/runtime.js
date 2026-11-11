@@ -1,5 +1,6 @@
 import { createActionCoordinator } from '../../core/action-coordinator.js';
 import { firebaseArray } from '../../core/firebase-array.js';
+import { createRemoteGate } from '../../core/remote-gate.js';
 import { generateRoomCode, normalizeRoomCode } from '../../core/room-code.js';
 import { createFirebaseRoomStore, isPlayerConnected } from '../../data/firebase-room-store.js';
 import { createGameSessionStore } from '../../platform/session-storage.js';
@@ -85,6 +86,10 @@ export function createPatteParPattaRuntime({
   const reportError = (error) => {
     if (typeof callbacks.onError === 'function') callbacks.onError(error);
   };
+  const gate = createRemoteGate({
+    verify: (input) => (store?.verifyRemoteTransition ? store.verifyRemoteTransition(input) : { valid: true }),
+    onInvalid: (details) => callbacks.onInvalidRemote?.(details),
+  });
 
   const updateIdentity = (room) => {
     host = room?.meta?.hostUid === uid;
@@ -98,6 +103,7 @@ export function createPatteParPattaRuntime({
     applyRemote: async ({ room, move }, { signal }) => {
       const incoming = room?.game;
       if (!incoming || (state && incoming.revision <= state.revision)) return;
+      if (!gate.allow(state, room)) return;
       const previous = state;
       const actor = move?.playerIndex;
       try {
@@ -127,6 +133,7 @@ export function createPatteParPattaRuntime({
         reportError(error);
       } finally {
         state = incoming;
+        gate.adopt(room);
         updateIdentity(room);
         try {
           await effects.render({ state, playerIndex: gamePlayerIndex, captured: move?.captured });
@@ -207,12 +214,14 @@ export function createPatteParPattaRuntime({
       if (move?.id) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
       } else if (
-        forceSnapshot
+        (forceSnapshot
         || !state
         || room.game.revision !== state.revision
-        || room.game.status !== state.status
+        || room.game.status !== state.status)
+        && gate.allow(state, room)
       ) {
         state = room.game;
+        gate.adopt(room);
         await effects.render({ state, playerIndex: gamePlayerIndex });
         callbacks.onState?.(state, { remote: true, move: null });
       }
@@ -221,7 +230,9 @@ export function createPatteParPattaRuntime({
       callbacks.onPresence?.({ room, state });
       return;
     }
+    if (!gate.allow(state, room)) { callbacks.onPresence?.({ room, state }); return; }
     state = room.game;
+    gate.adopt(room);
     callbacks.onLobby?.({ room, roomCode: store.roomCode, isHost: host, roomSlotIndex });
   }
 
@@ -230,6 +241,7 @@ export function createPatteParPattaRuntime({
     store = activeStore;
     roomSlotIndex = playerIndex;
     state = room.game;
+    gate.adopt(room);
     updateIdentity(room);
     sessions.save({ roomCode: store.roomCode, playerIndex: roomSlotIndex, uid });
 
@@ -338,6 +350,7 @@ export function createPatteParPattaRuntime({
       expectedRoster: Object.fromEntries(sortedPlayers(room).map(([slot, player]) => [slot, player.uid])),
     });
     state = updated.game;
+    gate.adopt(updated);
     updateIdentity(updated);
     await effects.render({ state, playerIndex: gamePlayerIndex });
     callbacks.onState?.(state, { remote: false, newRound: true });
@@ -360,6 +373,7 @@ export function createPatteParPattaRuntime({
     if (room.game?.status !== 'finished') throw new Error('The current round is not finished');
     const updated = await store.resetRoom({ state: waitingState(), status: 'waiting' });
     state = updated.game;
+    gate.adopt(updated);
     updateIdentity(updated);
     callbacks.onLobby?.({ room: updated, roomCode: store.roomCode, isHost: host, roomSlotIndex });
     return updated;
@@ -459,5 +473,6 @@ export function createPatteParPattaRuntime({
     get isHost() { return host; },
     get connected() { return Boolean(store) && !disposed; },
     get busy() { return coordinator.busy; },
+    get halted() { return gate.halted; },
   });
 }

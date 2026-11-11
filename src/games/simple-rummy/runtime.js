@@ -1,5 +1,6 @@
 import { createActionCoordinator } from '../../core/action-coordinator.js';
 import { firebaseArray } from '../../core/firebase-array.js';
+import { createRemoteGate } from '../../core/remote-gate.js';
 import { generateRoomCode, normalizeRoomCode } from '../../core/room-code.js';
 import { createFirebaseRoomStore, isPlayerConnected } from '../../data/firebase-room-store.js';
 import { createGameSessionStore } from '../../platform/session-storage.js';
@@ -128,6 +129,10 @@ export function createSimpleRummyRuntime({
   let handOrder = [];
 
   const reportError = (error) => callbacks.onError?.(error);
+  const gate = createRemoteGate({
+    verify: (input) => (store?.verifyRemoteTransition ? store.verifyRemoteTransition(input) : { valid: true }),
+    onInvalid: (details) => callbacks.onInvalidRemote?.(details),
+  });
 
   const sameOrder = (left, right) => left.length === right.length
     && left.every((cardId, index) => cardId === right[index]);
@@ -262,6 +267,7 @@ export function createSimpleRummyRuntime({
     applyRemote: async ({ room, move }, { signal }) => {
       const incoming = room?.game;
       if (!incoming || (state && incoming.revision <= state.revision)) return;
+      if (!gate.allow(state, room)) return;
       const previous = state;
       const actor = move?.playerIndex;
       const exactlyNext = previous && incoming.revision === previous.revision + 1;
@@ -283,6 +289,7 @@ export function createSimpleRummyRuntime({
         reportError(error);
       } finally {
         state = incoming;
+        gate.adopt(room);
         updateIdentity(room);
         try {
           await renderState({ state, move });
@@ -419,8 +426,9 @@ export function createSimpleRummyRuntime({
       const exactlyNext = state && incoming.revision === state.revision + 1;
       if (!forceSnapshot && move?.id && exactlyNext) {
         await coordinator.acceptRemote({ moveId: move.id, room, move });
-      } else {
+      } else if (gate.allow(state, room)) {
         state = incoming;
+        gate.adopt(room);
         try {
           await renderState({ state, move: null });
         } finally {
@@ -432,7 +440,9 @@ export function createSimpleRummyRuntime({
       callbacks.onPresence?.({ room, state });
       return;
     }
+    if (!gate.allow(state, room)) { callbacks.onPresence?.({ room, state }); return; }
     state = room.game;
+    gate.adopt(room);
     callbacks.onLobby?.({ room, roomCode: store.roomCode, isHost: host, roomSlotIndex });
   }
 
@@ -441,6 +451,7 @@ export function createSimpleRummyRuntime({
     store = activeStore;
     roomSlotIndex = playerIndex;
     state = room.game;
+    gate.adopt(room);
     updateIdentity(room);
     sessions.save({ roomCode: store.roomCode, playerIndex: roomSlotIndex, uid });
     unsubscribeRoom = store.subscribeRoom({
@@ -534,6 +545,7 @@ export function createSimpleRummyRuntime({
     const roster = Object.fromEntries(sortedPlayers(room).map(([slot, player]) => [slot, player.uid]));
     const updated = await store.resetRoom({ state: nextState, status: 'active', expectedRoster: roster });
     state = updated.game;
+    gate.adopt(updated);
     updateIdentity(updated);
     await renderState({ state });
     callbacks.onState?.(state, { remote: false, newRound: true });
@@ -551,6 +563,7 @@ export function createSimpleRummyRuntime({
     if (room.game?.status !== 'finished') throw new Error('The current round is not finished');
     const updated = await store.resetRoom({ state: waitingState(includeWinGroups), status: 'waiting' });
     state = updated.game;
+    gate.adopt(updated);
     updateIdentity(updated);
     callbacks.onLobby?.({ room: updated, roomCode: store.roomCode, isHost: host, roomSlotIndex });
     return updated;
@@ -591,8 +604,10 @@ export function createSimpleRummyRuntime({
       const previousRevision = state?.revision;
       const room = await store.readRoom();
       if (room?.meta?.status === 'active' && room.game
-        && (!state || room.game.revision >= state.revision)) {
+        && (!state || room.game.revision >= state.revision)
+        && gate.allow(state, room)) {
         state = room.game;
+        gate.adopt(room);
         updateIdentity(room);
         shouldRender = !Number.isSafeInteger(previousRevision)
           || room.game.revision > previousRevision;
@@ -662,5 +677,6 @@ export function createSimpleRummyRuntime({
     get isHost() { return host; },
     get connected() { return Boolean(store) && !disposed; },
     get busy() { return coordinator.busy; },
+    get halted() { return gate.halted; },
   });
 }

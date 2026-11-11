@@ -129,7 +129,55 @@ export function isPlayerConnected(room, uid) {
   if (!presence || typeof presence !== 'object') return true;
   if (typeof uid !== 'string' || uid.length === 0) return true;
   const node = presence[uidPathKey(uid)];
-  return Boolean(node && typeof node === 'object' && Object.keys(node).length > 0);
+  if (!node || typeof node !== 'object') return false;
+  // Only entries that carry this uid count: the rules let a player write
+  // presence entries with their own uid only, so nobody can keep another
+  // seat looking online by writing under that seat's key.
+  return Object.values(node).some((entry) => entry?.uid === uid);
+}
+
+/**
+ * Rebuilds the transition `action` a committing store passed to its validator
+ * from the `lastMove` record it wrote (same keys, same null defaults).
+ */
+function remoteAction(move) {
+  const base = {
+    moveId: move.id,
+    expectedRevision: move.expectedRevision,
+    playerIndex: move.playerIndex,
+  };
+  switch (move.type) {
+    case 'throw-card':
+      return { ...base, handIndex: move.handIndex, card: move.card, captured: move.captured };
+    case 'flip-card':
+      return {
+        ...base,
+        cardIndex: move.cardIndex,
+        card: move.card,
+        matched: move.matched,
+        matchedIndex: move.matched ? move.matchedIndex : null,
+      };
+    case 'draw-card':
+      return { type: 'draw-card', ...base, source: move.source, card: move.card ?? null };
+    case 'discard-card':
+      return {
+        type: 'discard-card',
+        ...base,
+        handIndex: move.handIndex,
+        card: move.card,
+        won: move.won,
+        winGroups: move.winGroups ?? null,
+      };
+    case 'poker-action':
+      return { type: 'poker-action', ...base, action: move.action };
+    case 'bluff-action':
+      return { type: 'bluff-action', ...base, action: move.action, payload: move.payload ?? null };
+    case 'skip-turn':
+    case 'claim-win':
+      return { type: move.type, ...base, actorIndex: move.actorIndex };
+    default:
+      return null;
+  }
 }
 
 function cleanPlayerData(player) {
@@ -1869,6 +1917,68 @@ export function createFirebaseRoomStore({
     return commitOutOfTurn({ ...payload, type: 'claim-win' });
   }
 
+  /**
+   * Receiver-side check of a remote update (the rules cannot replay card logic).
+   * Re-runs the same `validateTransition` the writer's store ran, for a single
+   * step (revision N → N+1) inside the same round (`meta/resetAt`, writable by
+   * the host or the offline-host inheritor only). Anything else — first load,
+   * restore, a new round, an older/equal revision, or a gap after a reconnect —
+   * cannot be checked here and is reported as `checked: false, valid: true`.
+   * @param {{ previousState: object|null, previousRound: number|null, room: object }} input
+   *   `room` is a decoded room (as returned by `readRoom`).
+   * @returns {{ valid: boolean, checked: boolean, reason?: string }}
+   */
+  function verifyRemoteTransition({ previousState = null, previousRound = null, room = null } = {}) {
+    const incoming = room?.game;
+    if (!previousState || !incoming) return { valid: true, checked: false };
+    if ((room?.meta?.resetAt ?? null) !== (previousRound ?? null)) {
+      return { valid: true, checked: false, reason: 'new-round' };
+    }
+    const before = previousState.revision;
+    const after = incoming.revision;
+    if (!Number.isSafeInteger(before) || !Number.isSafeInteger(after) || after !== before + 1) {
+      return { valid: true, checked: false };
+    }
+    const move = room.lastMove;
+    if (!move || typeof move !== 'object'
+      || move.revision !== after || move.expectedRevision !== before) {
+      return { valid: false, checked: true, reason: 'move-revision-mismatch' };
+    }
+    const action = remoteAction(move);
+    if (!action) return { valid: false, checked: true, reason: 'unsupported-move-type' };
+
+    const attempt = (currentState, nextState) => {
+      try {
+        return readVerdict(validateTransition({
+          currentState: cloneFirebaseValue(currentState, 'previous state'),
+          nextState: cloneFirebaseValue(nextState, 'incoming state'),
+          action: cloneFirebaseValue(action, 'remote action'),
+        }));
+      } catch (_) {
+        return { valid: false, reason: 'transition-validator-failed' };
+      }
+    };
+    let verdict = attempt(previousState, incoming);
+    if (!verdict.valid) {
+      // Retry in the exact form the writer validated (decode(encode(state))),
+      // so a harmless Firebase round-trip difference never stops honest play.
+      let normalized = null;
+      try {
+        normalized = [
+          decodeState(encodeGame(previousState)),
+          decodeState(encodeGame(incoming)),
+        ];
+      } catch (_) { normalized = null; }
+      if (normalized) {
+        const retry = attempt(normalized[0], normalized[1]);
+        if (retry.valid) verdict = retry;
+      }
+    }
+    return verdict.valid
+      ? { valid: true, checked: true }
+      : { valid: false, checked: true, reason: verdict.reason || 'invalid-transition' };
+  }
+
   return Object.freeze({
     get path() { return roomPath(); },
     get roomCode() { return selectedRoomCode; },
@@ -1894,5 +2004,6 @@ export function createFirebaseRoomStore({
     commitBluffAction,
     commitSkip,
     commitClaim,
+    verifyRemoteTransition,
   });
 }
