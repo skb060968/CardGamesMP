@@ -110,8 +110,10 @@ function initVoiceWidget() {
     mount: '#voice-widget',
     game: 'cardsmp',
     getRoomCode: () => runtime?.roomCode || null,
-    getIdentity: () => (runtime && runtime.playerIndex >= 0 ? `player_${runtime.playerIndex}` : null),
-    getDisplayName: () => (runtime && runtime.playerIndex >= 0 ? `Player ${runtime.playerIndex + 1}` : 'Player'),
+    // Room slot (stable for the whole stay in the room), not the per-round game
+    // seat: seats shift between rounds and players sitting a round out have none.
+    getIdentity: () => (runtime && runtime.playerSlotIndex >= 0 ? `player_${runtime.playerSlotIndex}` : null),
+    getDisplayName: () => (runtime && runtime.playerSlotIndex >= 0 ? `Player ${runtime.playerSlotIndex + 1}` : 'Player'),
     getIdToken: async () => {
       const client = await firebaseClient();
       return client.user.getIdToken();
@@ -187,7 +189,7 @@ function classifyErrorMessage(error) {
     'room-not-found': 'Room not found.',
     'room-full': 'Room is full.',
     'room-not-joinable': 'This round has already started.',
-    'identity-already-in-room': 'This browser tab is already a player in this room. Open the join link in a new tab or another device.',
+    'identity-already-in-room': "You're already in this room on another tab or device.",
     'room-not-waiting': 'Players can only be removed while waiting in the lobby.',
     'player-not-found': 'That player has already left.',
     'player-identity-mismatch': 'The lobby changed. Please try again.',
@@ -296,6 +298,24 @@ function trackLobbyDisconnections(entries, roomSlotIndex) {
 }
 
 /**
+ * Host, or (host-loss inheritance) the first connected seat while the host is
+ * offline. Mirrors the room store's `canActForOfflineHost`, computed from the
+ * lobby snapshot so it also works before `runtime` is assigned (session restore).
+ */
+function mayStartFromLobby(room, isHost, roomSlotIndex) {
+  if (isHost) return true;
+  const hostUid = room?.meta?.hostUid;
+  const myUid = Number.isInteger(roomSlotIndex) ? room?.players?.[`player_${roomSlotIndex}`]?.uid : null;
+  if (!hostUid || !myUid || isPlayerConnected(room, hostUid)) return false;
+  for (let index = 0; index < 6; index += 1) {
+    const seatUid = room.players?.[`player_${index}`]?.uid;
+    if (!seatUid || !isPlayerConnected(room, seatUid)) continue;
+    return seatUid === myUid;
+  }
+  return false;
+}
+
+/**
  * Shared lobby renderer: annotates each player with presence-derived
  * `connected`, hides players who have been offline past the linger window
  * (never the host or the local player), gates the host Start button on the
@@ -325,13 +345,14 @@ function presentLobby(options) {
     isHost,
     visible.map((entry) => entry.key),
   );
+  const canStart = mayStartFromLobby(room, isHost, roomSlotIndex);
   const startBtn = element(startId);
   if (startBtn) {
-    startBtn.hidden = !isHost;
-    if (isHost) startBtn.disabled = connectedCount < LOBBY_MIN_CONNECTED;
+    startBtn.hidden = !canStart;
+    if (canStart) startBtn.disabled = connectedCount < LOBBY_MIN_CONNECTED;
   }
   const waiting = element(waitingId);
-  if (waiting) waiting.hidden = isHost;
+  if (waiting) waiting.hidden = canStart;
   showScreen(screenId);
 
   rerenderLobby = () => presentLobby(options);
@@ -731,6 +752,7 @@ async function buildRuntime(gameId) {
           if (result?.reason === 'busy') showToast('Finishing the current Poker action…');
           else if (result?.reason === 'disposed') showToast('This Poker session has ended.');
         },
+        onChipsReset: () => showToast('Chips reset — new table', 3000),
         onConnected: ({ roomCode }) => { element('pk-lobby-room-code').textContent = roomCode; },
         onLobby: renderPKLobby,
         onState: (state) => { if (state.status === 'betting') showScreen('pk-gameplay'); syncSeatPresence(); refreshStallGuards(); },
@@ -848,6 +870,10 @@ async function leaveCurrentRoom() {
   const current = runtime;
   runtime = null;
   activeGameId = null;
+  // onDisconnected skips its cleanup once `runtime` is cleared, so do it here:
+  // a stale watchdog / presence snapshot must not touch the next room.
+  presenceRoom = null;
+  clearWatchdog();
   hideVoiceDock();
   if (current?.connected) await current.leaveRoom();
   else await current?.close();
@@ -1139,7 +1165,7 @@ async function setupServiceWorkerUpdates() {
 
   laterButton.addEventListener('click', () => { if (!applying) toast.hidden = true; });
   updateButton.addEventListener('click', async () => {
-    if (applying || !applyWaitingUpdate) return;
+    if (applying) return;
     applying = true;
     toast.hidden = false;
     toast.setAttribute('aria-busy', 'true');
@@ -1148,13 +1174,15 @@ async function setupServiceWorkerUpdates() {
     updateButton.textContent = 'Updating…';
     message.textContent = runtime?.busy
       ? 'Finishing the current move before updating…'
-      : 'Applying update… The app will reload automatically.';
+      : 'Applying update… the app will reload automatically.';
     try {
       await waitForRuntimeIdle();
-      message.textContent = 'Applying update… The app will reload automatically.';
+      message.textContent = 'Applying update… the app will reload automatically.';
       await nextPaint();
-      const applied = await applyWaitingUpdate({ reload: true });
-      if (!applied) throw new Error('The update is no longer waiting.');
+      // Reloads on controllerchange, or after the 5-s fallback in applyUpdate.
+      const applied = applyWaitingUpdate ? await applyWaitingUpdate({ reload: true }) : false;
+      // No waiting worker (already activated elsewhere): show "Updating…" briefly, then reload.
+      if (!applied) setTimeout(() => location.reload(), 400);
     } catch (error) {
       console.error('[CardGamesMP] Update failed:', error);
       applying = false;

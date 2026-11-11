@@ -330,7 +330,10 @@ export function createFlipAndMatchRuntime({
   async function startRound() {
     ensureConnected();
     const room = await store.readRoom();
-    if (room.meta?.hostUid !== uid) throw new Error('Only the host can start a round');
+    // Host, or (host-loss inheritance) the first connected seat while the host is offline.
+    if (room.meta?.hostUid !== uid && !store.canActForOfflineHost(room)) {
+      throw new Error('Only the host can start a round');
+    }
     const entries = connectedPlayers(room).slice(0, MAX_PLAYERS);
     if (entries.length < 2) throw new Error('At least two connected players are required');
 

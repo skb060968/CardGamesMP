@@ -111,7 +111,9 @@ export function isValidSet(cards) {
 }
 
 export function isValidSequence(cards) {
-  if (!Array.isArray(cards) || cards.length < 3 || cards.length > 4) return false;
+  // 3 or more cards in a row (How to Play); checkWin's subset search already
+  // tries groups of every size, so longer runs (e.g. 5-card) partition too.
+  if (!Array.isArray(cards) || cards.length < 3) return false;
   if (!cards.every((card) => isRecord(card) && card.suit === cards[0]?.suit)) return false;
   const values = cards.map((card) => RANK_VALUE[String(card.rank)]);
   if (values.some((value) => value == null) || new Set(values).size !== values.length) return false;

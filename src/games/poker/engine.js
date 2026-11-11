@@ -149,6 +149,37 @@ function allActivePlayersHaveActed(state) {
   return activeIndices(state).every((index) => state.players[index].hasActed);
 }
 
+/** No all-in / side pots: a bet or raise to `newBet` is only allowed when every
+ *  other active player can still afford to call it (capped at the smallest stack). */
+function othersCanCall(state, playerIndex, newBet) {
+  return activeIndices(state).every((index) => index === playerIndex
+    || state.players[index].chips >= newBet - state.players[index].currentBet);
+}
+
+/** True when the player may bet (nothing bet yet) or raise by one BET_AMOUNT right now. */
+export function canIncreaseBet(state, playerIndex) {
+  const player = state?.players?.[playerIndex];
+  if (!player || player.folded || player.broke) return false;
+  const active = activeIndices(state);
+  const maxBet = Math.max(...active.map((index) => state.players[index].currentBet));
+  const newBet = maxBet + BET_AMOUNT;
+  return player.chips >= newBet - player.currentBet && othersCanCall(state, playerIndex, newBet);
+}
+
+/** Every active seat holding the best hand at a show, in seat order (a tie splits the pot). */
+export function showWinnerIndices(state) {
+  const active = activeIndices(state);
+  const scores = active.map((index) => handScore(state.players[index].hand));
+  const best = Math.max(...scores);
+  return active.filter((_, position) => scores[position] === best);
+}
+
+/** Even split of `pot` between `winners`; the remainder chip(s) go to the lowest seat. */
+function potShares(pot, winners) {
+  const share = Math.floor(pot / winners.length);
+  return winners.map((_, position) => share + (position === 0 ? pot - share * winners.length : 0));
+}
+
 function checkShowEligible(state) {
   const active = activeIndices(state);
   if (active.length < 2 || !active.every((index) => state.players[index].hasActed)) return false;
@@ -249,17 +280,13 @@ export function resolveShow(state) {
   assertValid(state);
   const active = activeIndices(state);
   if (active.length < 2) throw new Error('Need at least 2 active players for show');
-  let winnerIndex = active[0];
-  let bestScore = handScore(state.players[winnerIndex].hand);
-  for (const index of active.slice(1)) {
-    const score = handScore(state.players[index].hand);
-    if (score > bestScore || (score === bestScore && index < winnerIndex)) {
-      winnerIndex = index;
-      bestScore = score;
-    }
-  }
+  // Equal best hands split the pot; winnerIndex stays the lowest tied seat.
+  const winners = showWinnerIndices(state);
+  const winnerIndex = winners[0];
   const players = state.players.map(clonePlayer);
-  players[winnerIndex].chips += state.pot;
+  potShares(state.pot, winners).forEach((share, position) => {
+    players[winners[position]].chips += share;
+  });
   const result = {
     ...state, players, deck: state.deck.map(cloneCard), prng: { ...state.prng },
     pot: 0, status: 'finished', winnerIndex, showEligible: false, finishReason: 'show',
@@ -287,6 +314,7 @@ export function performAction(state, playerIndex, action) {
   if (action.type === 'bet') {
     if (maxBet > 0) throw new Error('Cannot bet — someone has already bet. Use call or raise instead.');
     if (player.chips < BET_AMOUNT) throw new Error('Insufficient chips for bet');
+    if (!othersCanCall(state, playerIndex, BET_AMOUNT)) throw new Error('Bet capped: another player could not call it');
     players[playerIndex].chips -= BET_AMOUNT;
     players[playerIndex].currentBet += BET_AMOUNT;
     players[playerIndex].hasActed = true;
@@ -302,6 +330,9 @@ export function performAction(state, playerIndex, action) {
   } else if (action.type === 'raise') {
     const cost = maxBet - player.currentBet + BET_AMOUNT;
     if (player.chips < cost) throw new Error('Insufficient chips for raise');
+    if (!othersCanCall(state, playerIndex, maxBet + BET_AMOUNT)) {
+      throw new Error('Raise capped: another player could not call it');
+    }
     players[playerIndex].chips -= cost;
     players[playerIndex].currentBet += cost;
     players[playerIndex].hasActed = true;
@@ -499,9 +530,17 @@ export function validateState(state) {
   }
   if (actualChips !== expectedChips) return invalid(`Chip conservation mismatch: expected ${expectedChips}, found ${actualChips}`);
   if (state.status === 'betting' && state.pot !== currentBetTotal) return invalid('Pot and committed bets mismatch');
+  const awards = state.players.map((_, index) => (
+    state.status === 'finished' && index === state.winnerIndex ? currentBetTotal : 0));
+  if (state.status === 'finished' && state.finishReason === 'show' && activeIndices(state).length >= 2) {
+    // A show splits the pot evenly between tied best hands (remainder to the lowest seat).
+    const winners = showWinnerIndices(state);
+    awards.fill(0);
+    potShares(currentBetTotal, winners).forEach((share, position) => { awards[winners[position]] = share; });
+  }
   for (let index = 0; index < state.players.length; index += 1) {
     const player = state.players[index];
-    const award = state.status === 'finished' && index === state.winnerIndex ? currentBetTotal : 0;
+    const award = awards[index];
     const expectedBalance = player.roundStartChips - player.currentBet + award;
     if (player.chips !== expectedBalance) return invalid(`Invalid chip distribution at player ${index}`);
   }
@@ -526,16 +565,7 @@ export function validateState(state) {
       if (active.length !== 1 || state.winnerIndex !== active[0]) return invalid('Invalid fold winner');
     } else if (state.finishReason === 'show') {
       if (active.length < 2 || state.winnerIndex == null) return invalid('Invalid show result');
-      let expectedWinner = active[0];
-      let score = handScore(state.players[expectedWinner].hand);
-      for (const index of active.slice(1)) {
-        const candidate = handScore(state.players[index].hand);
-        if (candidate > score || (candidate === score && index < expectedWinner)) {
-          expectedWinner = index;
-          score = candidate;
-        }
-      }
-      if (state.winnerIndex !== expectedWinner) return invalid('Incorrect show winner');
+      if (state.winnerIndex !== showWinnerIndices(state)[0]) return invalid('Incorrect show winner');
     }
   }
   return { valid: true };

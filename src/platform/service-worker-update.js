@@ -1,3 +1,5 @@
+const CONTROLLER_CHANGE_FALLBACK_MS = 5000;
+
 export async function createServiceWorkerUpdateClient(options = {}) {
   if (!('serviceWorker' in navigator)) return null;
   const { scriptUrl = '/sw.js', scope = '/', signal, onUpdateAvailable = () => {} } = options;
@@ -20,8 +22,11 @@ export async function createServiceWorkerUpdateClient(options = {}) {
   async function applyUpdate({ reload = true } = {}) {
     waiting = registration.waiting || waiting;
     if (!waiting) return false;
-    const changed = new Promise((resolve) =>
-      navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true }));
+    const changed = new Promise((resolve) => {
+      navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true });
+      // Safety net (platform standard): reload anyway if the new worker never takes control.
+      setTimeout(resolve, CONTROLLER_CHANGE_FALLBACK_MS);
+    });
     waiting.postMessage({ type: 'SKIP_WAITING' });
     await changed;
     if (reload) location.reload();

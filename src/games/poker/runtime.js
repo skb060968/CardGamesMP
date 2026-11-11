@@ -360,10 +360,22 @@ export function createPokerRuntime({
     return entries.map(([slot], index) => Array.isArray(input) ? input[index] : input[slot]);
   }
 
+  /** Stashed balances are keyed by uid, so a newcomer in a freed slot starts fresh. */
+  function stashedChips(entries, stash) {
+    if (!stash || typeof stash !== 'object' || Array.isArray(stash)) return undefined;
+    return entries.map(([, player]) => {
+      const chips = stash[player.uid];
+      return Number.isSafeInteger(chips) && chips >= 0 ? chips : undefined;
+    });
+  }
+
   async function launchRound(options = {}, carryInput) {
     ensureConnected();
     const room = await store.readRoom();
-    if (room.meta?.hostUid !== uid) throw new Error('Only the host can start a round');
+    // Host, or (host-loss inheritance) the first connected seat while the host is offline.
+    if (room.meta?.hostUid !== uid && !store.canActForOfflineHost(room)) {
+      throw new Error('Only the host can start a round');
+    }
     const entries = connectedPlayers(room).slice(0, MAX_PLAYERS);
     if (entries.length < 2) throw new Error('At least two connected players are required');
     const infos = entries.map(([slot, player]) => ({
@@ -374,8 +386,18 @@ export function createPokerRuntime({
     // Chips carried across rounds live on the waiting state (see returnToLobby)
     // so they survive the trip through the lobby; an explicit carry wins.
     const stashed = room.game?.status === 'waiting' ? room.game.carriedChips : undefined;
+    let existingChips = carryInput != null
+      ? carriedChips(entries, carryInput)
+      : stashedChips(entries, stashed);
+    // Dead table: fewer than two players can afford the bet, so nobody could
+    // ever play again. Reset every stack to the starting chips (new table).
+    const betAmount = Number.isSafeInteger(rules.BET_AMOUNT) ? rules.BET_AMOUNT : 10;
+    const startingChips = Number.isSafeInteger(rules.STARTING_CHIPS) ? rules.STARTING_CHIPS : 200;
+    const chipsReset = Array.isArray(existingChips)
+      && existingChips.filter((chips) => (chips ?? startingChips) >= betAmount).length < 2;
+    if (chipsReset) existingChips = undefined;
     const baseState = rules.createGame(infos, {
-      existingChips: carriedChips(entries, carryInput ?? stashed),
+      existingChips,
       seed: options.seed,
     });
     const playerSlots = entries.map(([slot]) => slot);
@@ -399,6 +421,7 @@ export function createPokerRuntime({
     });
     state = updated.game;
     updateIdentity(updated);
+    if (chipsReset) callbacks.onChipsReset?.();
     await renderState({ state });
     callbacks.onState?.(state, { remote: false, newRound: true });
     callbacks.onPresence?.({ room: updated, state });
@@ -424,10 +447,14 @@ export function createPokerRuntime({
       throw new Error('Only the host can start another round');
     }
     if (room.game?.status !== 'finished') throw new Error('The current round is not finished');
+    // Keyed by uid (not slot): a newcomer who takes a freed slot must not inherit
+    // the previous occupant's balance.
     const balances = {};
     firebaseArray(room.game.playerSlots).forEach((slot, index) => {
       const chips = room.game.players?.[index]?.chips;
-      if (typeof slot === 'string' && Number.isSafeInteger(chips) && chips >= 0) balances[slot] = chips;
+      const seatUid = typeof slot === 'string' ? room.players?.[slot]?.uid : null;
+      if (typeof seatUid === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(seatUid)
+        && Number.isSafeInteger(chips) && chips >= 0) balances[seatUid] = chips;
     });
     const nextState = { ...waitingState() };
     if (Object.keys(balances).length) nextState.carriedChips = balances;

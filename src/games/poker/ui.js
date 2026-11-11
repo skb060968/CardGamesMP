@@ -1,5 +1,12 @@
 import { renderCardBack, renderCardFace } from '../../shared/card-renderer.js';
-import { evaluateHand } from './engine.js';
+import { canIncreaseBet, evaluateHand, showWinnerIndices } from './engine.js';
+
+/** Seats that won the round: every tied best hand at a show, else the single winner. */
+function winnerSeats(state) {
+  if (state.status !== 'finished' || state.winnerIndex == null) return [];
+  if (state.finishReason === 'show') return showWinnerIndices(state);
+  return [state.winnerIndex];
+}
 
 function clear(element) {
   if (element) element.innerHTML = '';
@@ -140,17 +147,19 @@ function renderActions(state, localPlayerIndex, onAction) {
   const maxBet = Math.max(...active.map((item) => item.currentBet));
   const needToCall = maxBet - player.currentBet;
   const allActed = active.every((item) => item.hasActed);
+  // Bets and raises are capped so every other player can still call (no side pots).
+  const canIncrease = canIncreaseBet(state, localPlayerIndex);
   if (maxBet === 0) {
-    if (player.chips >= 10) actionButton(row, 'Bet (10)', 'primary', 'bet', onAction);
+    if (canIncrease) actionButton(row, 'Bet (10)', 'primary', 'bet', onAction);
   } else if (needToCall > 0) {
     const canCall = player.chips >= needToCall;
     const raiseCost = needToCall + 10;
-    const canRaise = player.chips >= raiseCost;
+    const canRaise = canIncrease;
     if (canCall) actionButton(row, `Call (${needToCall})`, 'secondary', 'call', onAction);
     if (canRaise) actionButton(row, `Raise (${raiseCost})`, 'primary pk-raise-btn', 'raise', onAction);
     if (allActed || (!canCall && !canRaise)) actionButton(row, 'Fold', 'secondary pk-fold-btn', 'fold', onAction);
   } else if (allActed) {
-    if (player.chips >= 10) actionButton(row, 'Raise (10)', 'primary pk-raise-btn', 'raise', onAction);
+    if (canIncrease) actionButton(row, 'Raise (10)', 'primary pk-raise-btn', 'raise', onAction);
     if (state.showEligible) actionButton(row, '👁 Show', 'primary pk-show-btn', 'show', onAction);
     actionButton(row, 'Fold', 'secondary pk-fold-btn', 'fold', onAction);
   }
@@ -172,9 +181,18 @@ export function renderGameplay(state, localPlayerIndex, callbacks = {}) {
 
 export function renderResults(state, isFoldWin = state.finishReason === 'fold') {
   const display = clear(document.getElementById('pk-winner-display'));
+  const winners = winnerSeats(state);
   if (display) {
     if (state.winnerIndex == null) appendText(display, 'winner-name', 'Game ended — no winner', 'div');
-    else {
+    else if (winners.length > 1) {
+      // Tied best hands: the pot is split evenly (remainder chip to the lowest seat).
+      const names = winners.map((index) => state.players[index].name);
+      const share = Math.floor(state.players.reduce((total, player) => total + player.currentBet, 0) / winners.length);
+      appendText(display, 'winner-emoji', '🤝', 'div');
+      appendText(display, 'winner-name', `Split pot: ${names.join(' & ')}`, 'div');
+      appendText(display, 'winner-bounty', `Tied — ${evaluateHand(state.players[winners[0]].hand).label}`, 'div');
+      appendText(display, 'pk-winner-chips', `💰 ${share} chips each`, 'div');
+    } else {
       const winner = state.players[state.winnerIndex];
       const potGain = Math.max(0, winner.chips - winner.roundStartChips);
       appendText(display, 'winner-emoji', winner.emoji || '🏆', 'div');
@@ -200,6 +218,10 @@ export function renderResults(state, isFoldWin = state.finishReason === 'fold') 
     item.appendChild(top);
     if (player.broke) {
       appendText(item, 'pk-results-folded', '— broke, sat out —', 'div');
+    } else if (state.finishReason !== 'show' || player.folded) {
+      // Only hands still in at a show are revealed; folded hands (and every hand
+      // after a fold-win) stay hidden.
+      appendText(item, 'pk-results-folded', player.folded ? 'Folded' : 'Hand not shown', 'div');
     } else {
       const hand = document.createElement('div');
       hand.className = `pk-results-hand${player.folded ? ' pk-results-hand-folded' : ''}`;
@@ -211,7 +233,7 @@ export function renderResults(state, isFoldWin = state.finishReason === 'fold') 
       });
       const label = player.folded ? 'Folded' : evaluateHand(player.hand).label;
       const rank = appendText(hand, `pk-results-rank${player.folded ? ' pk-results-folded-tag' : ''}`, label);
-      rank.classList.toggle('pk-results-rank-winner', index === state.winnerIndex);
+      rank.classList.toggle('pk-results-rank-winner', winners.includes(index));
       item.appendChild(hand);
     }
     list.appendChild(item);

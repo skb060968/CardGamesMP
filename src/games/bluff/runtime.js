@@ -519,7 +519,10 @@ export function createBluffRuntime({
   async function launchRound(options = {}) {
     ensureConnected();
     const room = await store.readRoom();
-    if (room.meta?.hostUid !== uid) throw new Error('Only the host can start a round');
+    // Host, or (host-loss inheritance) the first connected seat while the host is offline.
+    if (room.meta?.hostUid !== uid && !store.canActForOfflineHost(room)) {
+      throw new Error('Only the host can start a round');
+    }
     const entries = connectedPlayers(room).slice(0, MAX_PLAYERS);
     if (entries.length < 2 || entries.length > MAX_PLAYERS) throw new Error('Bluff requires 2-4 connected players');
     const infos = entries.map(([slot, player]) => ({
